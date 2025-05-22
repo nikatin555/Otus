@@ -79,7 +79,7 @@ root@zfs:~# zfs get all | grep compression <br>
 root@zfs:~# for i in {1..4}; do wget -P /otus$i https://gutenberg.org/cache/epub/2600/pg2600.converter.log; done
 
 Проверим, что файл был скачан во все пулы:<br>
-root@zfs:~# ls -l /otus*
+root@zfs:~# ls -l /otus*<br>
 ![alt text](image-4.png)
 
 Уже на этом этапе видно, что самый оптимальный метод сжатия у нас используется в пуле otus3.
@@ -88,7 +88,7 @@ root@zfs:~# zfs list<br>
 ![alt text](image-5.png)
 
 Проверю степень сжатия файлов:<br>
-root@zfs:~# zfs get all | grep compressratio | grep -v ref
+root@zfs:~# zfs get all | grep compressratio | grep -v ref<br>
 ![alt text](image-6.png)
 
 Итог: алгоритм gzip-9 получился самым эффективным по сжатию.
@@ -107,7 +107,7 @@ archive.tar.gz zpoolexport
 
 
 Проверяю, возможно ли импортировать данный каталог в пул:<br>
-root@zfs:~# zpool import -d zpoolexport/
+root@zfs:~# zpool import -d zpoolexport/<br>
 ![alt text](image-7.png)
 
 Данный вывод показал имя пула, тип raid и его состав. 
@@ -122,15 +122,15 @@ root@zfs:~# zpool status<br>
 root@zfs:~# zpool get all otus
 
 Запрос сразу всех параметром файловой системы:<br>
-root@zfs:~# zfs get all otus
-![alt text](image-9.png)
+root@zfs:~# zfs get all otus<br>
+![alt text](image-9.png)<br>
 ![alt text](image-10.png)
 
 
 
 C помощью команды grep уточню конкретный параметр, например:
 - размер:<br>
-root@zfs:~# zfs get available otus
+root@zfs:~# zfs get available otus<br>
 ![alt text](image-11.png)
 
 - тип:<br>
@@ -142,11 +142,11 @@ root@zfs:~# zfs get recordsize otus
 ![alt text](image-13.png)
 
 - Тип сжатия (или параметр отключения):<br>
-root@zfs:~# zfs get compression otus
+root@zfs:~# zfs get compression otus<br>
 ![alt text](image-14.png)
 
 - Тип контрольной суммы:<br>
-root@zfs:~# zfs get checksum otus
+root@zfs:~# zfs get checksum otus<br>
 ![alt text](image-15.png)
 
 ## 3. Работа со снапшотом, поиск сообщения от преподавателя
