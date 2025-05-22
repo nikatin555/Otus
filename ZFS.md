@@ -136,11 +136,11 @@ root@zfs:~# zfs get available otus<br>
 ![alt text](image-11.png)
 
 - тип:<br>
-root@zfs:~# zfs get readonly otus
+root@zfs:~# zfs get readonly otus<br>
 ![alt text](image-12.png)<br>
 По типу FS мы можем понять, что позволяет выполнять чтение и запись.
 - Значение recordsize:<br>
-root@zfs:~# zfs get recordsize otus
+root@zfs:~# zfs get recordsize otus<br>
 ![alt text](image-13.png)
 
 - Тип сжатия (или параметр отключения):<br>
