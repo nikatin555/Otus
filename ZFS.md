@@ -101,8 +101,8 @@ root@zfs:~# ls<br>
 archive.tar.gz 
 
 Разархивирую его:<br>
-root@zfs:~# tar -xzvf archive.tar.gz<br>
-root@zfs:~# ls<br>
+root@zfs:~#tar -xzvf archive.tar.gz<br>
+root@zfs:~#ls<br>
 archive.tar.gz zpoolexport
 
 
@@ -111,8 +111,8 @@ root@zfs:~# zpool import -d zpoolexport/<br>
 ![alt text](image-7.png)
 
 Данный вывод показал имя пула, тип raid и его состав. 
-Сделаю импорт данного пула в ОС:<br>
-root@zfs:~# zpool import -d zpoolexport/ otus<br>
+Сделаю импорт данного пула в ОС: <br>
+root@zfs:~# zpool import -d zpoolexport/ otus <br>
 root@zfs:~# zpool status<br>
 ![alt text](image-8.png)
 
