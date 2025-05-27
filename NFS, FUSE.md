@@ -110,6 +110,7 @@ root@nfsc:/mnt/upload# reboot
 9. проверяем, что файл успешно создан.
 
 ![alt text](image-25.png)<br>
-![alt text](image-26.png)
+![alt text](image-26.png)<br>
+![alt text](image-27.png)
 
 Файл final_check доступен как на сервере NFS, так и на клиенте.
