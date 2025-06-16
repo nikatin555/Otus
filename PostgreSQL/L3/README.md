@@ -138,14 +138,14 @@ sudo docker run -d \ <br>
   ## Проверка сохранности данных
 
   Подключаюсь через клиентский контейнер:<br>
-  docker run -it --rm \<br>
-  --name pg-client \<br>
-  --network host \<br>
-  postgres:15 \<br>
-  psql -h localhost -U posadmins -c "SELECT * FROM test;"<br>
+  docker run -it --rm \ <br>
+  --name pg-client \ <br>
+  --network host \ <br>
+  postgres:15 \ <br>
+  psql -h localhost -U posadmins -c "SELECT * FROM test;" <br>
   ![alt text](image-5.png)
 
-C другого ноутбука при помощи ПО DBeaver:<br>
+C другого ноутбука при помощи ПО DBeaver: <br>
 ![alt text](image-6.png)
 
 **Итог:**
