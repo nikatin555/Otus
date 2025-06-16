@@ -81,7 +81,7 @@ sudo -u postgres psql  <br>
   COMMIT; <br>
 ![alt text](image-4.png)
 
-## посмотреть текущий уровень изоляции: 
+## Посмотреть текущий уровень изоляции: 
 
 проверим уровень изоляции в обеих сессиях: <br>
 postgres=!#  SHOW TRANSACTION ISOLATION LEVEL; <br>
@@ -98,7 +98,7 @@ BEGIN; <br>
 В 1ю сессию добавляем: <br>
 insert into persons(first_name, second_name) values('sergey', 'sergeev'); <br>
 
-## сделать select from persons во второй сессии. Видите ли вы новую запись и если да то почему? <br>
+## Сделать select from persons во второй сессии. Видите ли вы новую запись и если да то почему? <br>
 postgres=#  SELECT * FROM persons; <br>
 ![alt text](image-9.png) <br>
 Результат: видны только данные ivan и petr. <br>
@@ -116,7 +116,7 @@ postgres=*# select * from persons; <br>
 Результат: sergey появился.
 Причина: после коммита изменения видны в read committed.
 
-## завершите транзакцию во второй сессии
+## Завершите транзакцию во второй сессии
 
 postgres=*# commit; <br>
 ![alt text](image-15.png)
@@ -139,10 +139,9 @@ postgres=# BEGIN; <br>
 
 postgres=*# select * from persons;<br>
 ![alt text](image-19.png)<br> 
-Результат: новую запись не видно. <br>
-Причина: незакоммиченные изменения не видны , п.э. новые записи не появились.
+Результат: новую запись не видно.
 
-## завершить первую транзакцию. Cделать select from persons во второй сессии. Видите ли вы новую запись и если да то почему?
+## Завершить первую транзакцию. Cделать select from persons во второй сессии. Видите ли вы новую запись и если да то почему?
 
 postgres=*# commit; <br>
 ![alt text](image-20.png)
