@@ -93,8 +93,7 @@ sudo docker run -it --rm \ <br>
   psql -h localhost -U posadmins<br>
 
   Создаю таблицу test со следующими столбцами:<br>
-  sql<br>
-CREATE TABLE test <br>
+ CREATE TABLE test <br>
 ( <br>
     Id SERIAL PRIMARY KEY, <br>
     FirstName CHARACTER VARYING(30), <br>
