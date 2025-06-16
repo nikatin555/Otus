@@ -65,7 +65,7 @@ psql --version<br>
 sudo -u postgres psql  <br>
 ![alt text](image-3.png)
 
-# Уровень изоляции Read Committed (по умолчанию)
+# Уровень изоляции Read Committed
 
 Отключим автокоммит (автоматическое сохранение изменений (autocommit) для текущей 1й сессии):<br>
 \set AUTOCOMMIT off
