@@ -25,18 +25,15 @@
 
 # Подготовка
 
-## Создадим директорию для скрипта и предоставим права:
+## Создадим директорию для скрипта:
  ```bash
- mkdir /etc/scripts && chmod +x /etc/scripts
+ mkdir /etc/scripts
 ```
 ## Создам скрипт и дадим права на выполнение:
   ```bash
- sudo nano /etc/scripts/pars_access.sh
+ sudo nano /etc/scripts/pars_access.sh && sudo chmod +x /etc/scripts/pars_access.sh
 ```
- ## Дайте права на выполнение:
-```bash
-sudo chmod 755 /etc/scripts/pars_access.sh
-```
+
 ## Установка и настройка mailutils для Gmail
 ```bash
 sudo apt update
@@ -70,80 +67,107 @@ echo "Test message" | mail -s "Test" nik@gmail.com
 ```bash
 #!/bin/bash
 
-# Блокировка от параллельного запуска
-LOCK_FILE="/tmp/pars_access.lock"
-exec 9>"$LOCK_FILE"
-if ! flock -n 9; then
-    echo "Script is already running. Exiting." >&2
+# Конфигурация
+LOG_FILE="/var/log/access.log"
+REPORT_FILE="/tmp/access_log_report.txt"
+TMP_FILE="/tmp/access_log_tmp.txt"
+LAST_RUN_FILE="/tmp/access_log_last_run.txt"
+LOCKFILE="/tmp/access_log_pars_access.lock"
+SCRIPT_LOG="/var/log/access_log_pars_access.log"
+EMAIL_TO="nik@gmail.com"
+EMAIL_SUBJECT="Access Log Report"
+
+# Функция для логирования
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$SCRIPT_LOG"
+}
+
+# Проверка и создание lock файла
+if [ -f "$LOCKFILE" ]; then
+    log "Script is already running. Exiting."
     exit 1
 fi
 
-# Конфигурация
-LOG_FILE="/var/log/access.log"
-LAST_RUN_FILE="/var/log/pars_access_last_run"
-EMAIL="nik@gmail.com"
-REPORT_FILE="/tmp/access_report.txt"
+touch "$LOCKFILE"
+trap 'rm -f "$LOCKFILE"; log "Script terminated"; exit' INT TERM EXIT
 
-# Получаем время последнего запуска
-current_time=$(date +%s)
-if [[ ! -f "$LAST_RUN_FILE" ]]; then
-    echo "$current_time" > "$LAST_RUN_FILE"
-    exit 0
+log "Starting script execution"
+
+# Получаем текущую дату и время
+START_TIME=$(date '+%Y-%m-%d %H:%M:%S')
+
+# Получаем текущую позицию в лог-файле
+CURRENT_SIZE=$(stat -c %s "$LOG_FILE" 2>/dev/null)
+
+if [ -z "$CURRENT_SIZE" ]; then
+    log "Error: Log file $LOG_FILE not found"
+    exit 1
 fi
-last_run=$(cat "$LAST_RUN_FILE")
 
-# Форматируем временной диапазон
-start_time_str=$(date -d "@$last_run" +"%Y-%m-%d %H:%M:%S")
-end_time_str=$(date -d "@$current_time" +"%Y-%m-%d %H:%M:%S")
+# Проверяем предыдущий запуск
+if [ -f "$LAST_RUN_FILE" ]; then
+    LAST_SIZE=$(cat "$LAST_RUN_FILE")
+    if [ "$CURRENT_SIZE" -lt "$LAST_SIZE" ]; then
+        log "Log file was rotated or truncated. Analyzing from beginning."
+        TAIL_POS=0
+    else
+        TAIL_POS=$LAST_SIZE
+    fi
+else
+    log "First run. Analyzing entire log file."
+    TAIL_POS=0
+fi
 
-# Формируем временной фильтр для логов
-TZ_OFFSET=$(date +%z)
-start_log_str=$(date -d "@$last_run" "+[%d/%b/%Y:%H:%M:%S $TZ_OFFSET]")
-end_log_str=$(date -d "@$current_time" "+[%d/%b/%Y:%H:%M:%S $TZ_OFFSET]")
+# Сохраняем текущую позицию
+echo "$CURRENT_SIZE" > "$LAST_RUN_FILE"
 
-# Генерация отчета
-{
-    echo "Access Log Report"
-    echo "Time range: $start_time_str - $end_time_str"
-    echo "=============================================="
-    echo
-   
-    # Топ IP-адресов
-    echo "Top 10 IP Addresses:"
-    awk -v start="$start_log_str" -v end="$end_log_str" \
-        '$4 >= start && $4 <= end {print $1}' "$LOG_FILE" | \
-        sort | uniq -c | sort -nr | head -n 10
-    echo
-   
-    # Топ URL
-    echo "Top 10 Requested URLs:"
-    awk -v start="$start_log_str" -v end="$end_log_str" \
-        '$4 >= start && $4 <= end {print $7}' "$LOG_FILE" | \
-        sort | uniq -c | sort -nr | head -n 10
-    echo
-   
-    # Ошибки сервера (коды 4xx и 5xx)
-    echo "Server Errors (4xx/5xx):"
-    awk -v start="$start_log_str" -v end="$end_log_str" \
-        '$4 >= start && $4 <= end && $9 >= 400 {print}' "$LOG_FILE"
-    echo
-   
-    # Коды HTTP ответа
-    echo "HTTP Status Codes Summary:"
-    awk -v start="$start_log_str" -v end="$end_log_str" \
-        '$4 >= start && $4 <= end {print $9}' "$LOG_FILE" | \
-        sort | uniq -c | sort -nr
-} > "$REPORT_FILE"
+# Создаем временный файл с новыми записями
+dd if="$LOG_FILE" bs=1 skip="$TAIL_POS" 2>/dev/null > "$TMP_FILE"
 
-# Отправка отчета
-mail -s "Access Log Report: $start_time_str - $end_time_str" "$EMAIL" < "$REPORT_FILE"
+# Получаем временной диапазон из лога
+FIRST_LINE_TIME=$(head -n 1 "$TMP_FILE" | awk -F'[][]' '{print $2}' 2>/dev/null || echo "unknown")
+LAST_LINE_TIME=$(tail -n 1 "$TMP_FILE" | awk -F'[][]' '{print $2}' 2>/dev/null || echo "unknown")
 
-# Обновляем время последнего запуска
-echo "$current_time" > "$LAST_RUN_FILE"
+# Генерируем отчет
+echo "Access Log Report - $(date)" > "$REPORT_FILE"
+echo "Time range in log: $FIRST_LINE_TIME - $LAST_LINE_TIME" >> "$REPORT_FILE"
+echo "Report generated at: $(date '+%Y-%m-%d %H:%M:%S')" >> "$REPORT_FILE"
+echo "Analyzed entries: $(wc -l < "$TMP_FILE")" >> "$REPORT_FILE"
+echo "======================================" >> "$REPORT_FILE"
+
+# 1. Топ IP адресов
+echo -e "\nTop IP Addresses:" >> "$REPORT_FILE"
+awk '{print $1}' "$TMP_FILE" | sort | uniq -c | sort -nr | head -n 10 >> "$REPORT_FILE"
+
+# 2. Топ запрашиваемых URL
+echo -e "\nTop Requested URLs:" >> "$REPORT_FILE"
+awk '{print $7}' "$TMP_FILE" | sort | uniq -c | sort -nr | head -n 10 >> "$REPORT_FILE"
+
+# 3. Ошибки веб-сервера/приложения
+echo -e "\nServer/Application Errors:" >> "$REPORT_FILE"
+grep -E ' (4[0-9]{2}|5[0-9]{2}) ' "$TMP_FILE" >> "$REPORT_FILE"
+
+# 4. Список всех кодов HTTP ответа
+echo -e "\nHTTP Status Codes:" >> "$REPORT_FILE"
+awk '{print $9}' "$TMP_FILE" | sort | uniq -c | sort -nr >> "$REPORT_FILE"
+
+# Отправка отчета по email
+if [ -f "$REPORT_FILE" ]; then
+    mailx -s "$EMAIL_SUBJECT ($FIRST_LINE_TIME - $LAST_LINE_TIME)" "$EMAIL_TO" < "$REPORT_FILE"
+    if [ $? -eq 0 ]; then
+        log "Report sent successfully to $EMAIL_TO"
+    else
+        log "Failed to send email to $EMAIL_TO"
+    fi
+else
+    log "Error: Report file not found"
+fi
 
 # Очистка
-rm -f "$REPORT_FILE"
-exec 9>&-
+rm -f "$TMP_FILE" "$LOCKFILE"
+
+END_TIME=$(date '+%Y-%m-%d %H:%M:%S')
+log "Script completed successfully. Execution time: $START_TIME - $END_TIME"
 ```
 
 ## Настройка CRON
