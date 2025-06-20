@@ -121,28 +121,26 @@ sudo systemctl start postgresql-17-1c_account
 # Проверяем статус
 sudo systemctl status postgresql-17-1c_account
 ```
+![alt text](image.png)
 Проверка работы:
 
 ```bash
 # Подключение к новому кластеру
 psql -p 5433 -h localhost -U postgres
-
-# Или с указанием каталога данных
-PGDATA=/var/lib/pgsql/17/1c_account psql -U postgres
 ```
 
  2. Вошел под пользователем postgres: 
 ```bash
-sudo -u postgres psql
+psql -p 5433 -h localhost -U postgres
 ```
- 3. Создал базу данных
+ 3. Создал базу данных testdb:
+ 
+  CREATE DATABASE testdb;
 
- testdb: CREATE DATABASE testdb;
-
- 4. Подключился к testdb
+ 4. Подключился к testdb:
  \c testdb
 
- 5 Создал схему testnm
+ 5. Создал схему testnm:
 
  CREATE SCHEMA testnm;
 
@@ -158,7 +156,7 @@ sudo -u postgres psql
 
  CREATE ROLE readonly;
 
- 9. Дал право на подключение
+ 9. Дал право на подключение:
 
  GRANT CONNECT ON DATABASE testdb TO readonly;
 
@@ -166,39 +164,43 @@ sudo -u postgres psql
 
 GRANT USAGE ON SCHEMA testnm TO readonly;
 
- 11. Дал право на SELECT
+ 11. Дал право на SELECT:
 
  GRANT SELECT ON ALL TABLES IN SCHEMA testnm TO readonly;
 
- 12. Создал пользователя testread
+ 12. Создал пользователя testread:
 
  CREATE USER testread WITH PASSWORD 'test123';
 
- 13. Назначил роль
+ 13. Назначил роль:
 
  GRANT readonly TO testread;
 
- 14. Вошел под testread
+ 14. Вошел под testread:
 
- psql -U testread -d testdb
+  psql -p 5433 -h localhost -U testread -d testdb
 
  15. Выполнил команду
 
  SELECT * FROM t1;
 
+ ![alt text](image-1.png)
+
  ## Анализ проблемы
 
-16. Не получилось - ошибка "отношение t1 не существует"
+16. Не получилось - ошибка "permission denied for table t1".
 
-17. PostgreSQL сообщил, что таблица t1 не найдена
+17. PostgreSQL сообщил, что доступ к таблице t1 запрещен.
 
-18. Таблица была создана без указания схемы и попала в схему public, а права мы давали только на схему testnm
+18. Таблица была создана без указания схемы и попала в схему public, а права мы давали только на схему testnm.
 
 ## Проверка таблиц
 
 19. Посмотрел список таблиц: \dt - таблица t1 в схеме public
 
 20-21. Таблица создалась в public, так как не указали явно схему testnm, а search_path по умолчанию включает public
+
+![alt text](image-2.png)
 
 ## Пересоздание таблицы
 
@@ -210,20 +212,34 @@ GRANT USAGE ON SCHEMA testnm TO readonly;
 
 25. Вставил строку: INSERT INTO testnm.t1 VALUES (1);
 
-26. Вошел под testread: psql -U testread -d testdb
+26. Вошел под testread:
+
+\c testdb testread;
 
 27. Выполнил SELECT * FROM testnm.t1;
 
 28. Снова ошибка - нет прав
 
+![alt text](image-3.png)
+
 ## Настройка прав
 
-29. Проблема в том, что GRANT SELECT ON ALL TABLES не действует на будущие таблицы
+29. Проблема в том, что GRANT SELECT ON ALL TABLES не действует на будущие таблицы, а табилца t1 пересоздавалась.
 
 30. Нужно изменить права по умолчанию для схемы:
+
+\c testdb postgres
+
 ```sql
 ALTER DEFAULT PRIVILEGES IN SCHEMA testnm GRANT SELECT ON TABLES TO readonly;
 ```
+\c testdb testread;
+![alt text](image-4.png)
+
+Снова ошибка, нет прав, пересоздадим таблицу и попробуем еще раз:
+
+![alt text](image-5.png)
+
 31. После этого SELECT * FROM testnm.t1; работает.
 
 32. Да, получилось.
@@ -234,20 +250,29 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA testnm GRANT SELECT ON TABLES TO readonly;
 
 ## Проблема с созданием таблиц
 
-37. При попытке CREATE TABLE t2(c1 integer); INSERT INTO t2 VALUES (2); - команды выполняются.
+37. При попытке CREATE TABLE t2(c1 integer); INSERT INTO t2 VALUES (2); - команды не выполняются.
+![alt text](image-7.png)
 
-38. Это происходит потому, что по умолчанию роль имеет права на создание объектов в public схеме.
+38. Это происходит потому, что по умолчанию роль не имеет права на создание объектов в public схеме.
 
-39. Чтобы убрать эти права:
+39. Но при установке PstgreSQL на deb системы, эти права есть по умолчанию.
+ Чтобы убрать эти права необходимо:
+ 
 ```sql
+\c testdb postgres;
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 REVOKE ALL ON DATABASE testdb FROM PUBLIC;
+\c testdb testread;
+CREATE TABLE t2(c1 integer);
+INSERT INTO t2 VALUES (2);
 ```
 40. Эти команды отзывают права по умолчанию у всех пользователей на создание объектов в public и на все права в БД.
 
 ## Финальная проверка
 
-41. При попытке CREATE TABLE t3(c1 integer); теперь получаем ошибку - нет прав.
+41. При попытке CREATE TABLE t3(c1 integer); теперь должно получать ошибку - нет прав.
+
+В PostgreSQL 17.5, установленной на Oracle Linux 9, данных прав не было изначально.
 
 42. Команда не выполняется, так как мы отозвали права CREATE у всех пользователей, что соответствует требованиям безопасности.
 
