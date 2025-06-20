@@ -2,7 +2,8 @@
 
 # Домашнее задание
 
-Работа с базами данных, пользователями и правами
+Работа с базами данных, пользователями и правами.
+
 **Цель:**
 
     создание новой базы данных, схемы и таблицы
@@ -58,7 +59,7 @@
 
   ## Создание кластера, базы данных, таблицы и пользователя
 
-1. Создадим новый кластер для PostgreSQL 17 на Oracle Linux 9 2мя способами:
+1. Создадим новый кластер для PostgreSQL 17 на Oracle Linux 9 2-мя способами:
 
  Способ 1: Использование systemd (рекомендуемый для RHEL/Oracle Linux)
 
@@ -101,8 +102,9 @@ sudo systemctl start postgresql-17-1c_account
 # Проверяем статус
 sudo systemctl status postgresql-17-1c_account
 ```
-Способ 2: Использование разных портов (если нужно запускать одновременно)
+Способ 2: Использование разных портов (если нужно запускать одновременно).
 
+Воспользуемся 2м способом:
 ```bash
 # Копируем конфиг из стандартного кластера
 sudo cp -a /var/lib/pgsql/17/data /var/lib/pgsql/17/1c_account
@@ -138,6 +140,7 @@ psql -p 5433 -h localhost -U postgres
   CREATE DATABASE testdb;
 
  4. Подключился к testdb:
+
  \c testdb
 
  5. Создал схему testnm:
@@ -196,7 +199,9 @@ GRANT USAGE ON SCHEMA testnm TO readonly;
 
 ## Проверка таблиц
 
-19. Посмотрел список таблиц: \dt - таблица t1 в схеме public
+19. Посмотрел список таблиц:
+
+\dt - таблица t1 в схеме public
 
 20-21. Таблица создалась в public, так как не указали явно схему testnm, а search_path по умолчанию включает public
 
@@ -204,7 +209,9 @@ GRANT USAGE ON SCHEMA testnm TO readonly;
 
 ## Пересоздание таблицы
 
-22. Вернулся под postgres: \c testdb postgres
+22. Вернулся под postgres:
+
+ \c testdb postgres
 
 23. Удалил таблицу: DROP TABLE t1;
 
@@ -227,13 +234,13 @@ GRANT USAGE ON SCHEMA testnm TO readonly;
 29. Проблема в том, что GRANT SELECT ON ALL TABLES не действует на будущие таблицы, а табилца t1 пересоздавалась.
 
 30. Нужно изменить права по умолчанию для схемы:
-
+```sql
 \c testdb postgres
 
-```sql
 ALTER DEFAULT PRIVILEGES IN SCHEMA testnm GRANT SELECT ON TABLES TO readonly;
-```
+
 \c testdb testread;
+```
 ![alt text](image-4.png)
 
 Снова ошибка, нет прав, пересоздадим таблицу и попробуем еще раз:
@@ -250,10 +257,15 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA testnm GRANT SELECT ON TABLES TO readonly;
 
 ## Проблема с созданием таблиц
 
-37. При попытке CREATE TABLE t2(c1 integer); INSERT INTO t2 VALUES (2); - команды не выполняются.
+37. При попытке создать новую таблицу, команды не выполняются, недостаточно прав:
+```sql
+CREATE TABLE t2(c1 integer);
+INSERT INTO t2 VALUES (2);
+  ```
+  
 ![alt text](image-7.png)
 
-38. Это происходит потому, что по умолчанию роль не имеет права на создание объектов в public схеме.
+38. Это происходит потому что по умолчанию роль не имеет права на создание объектов в public схеме.
 
 39. Но при установке PstgreSQL на deb системы, эти права есть по умолчанию.
  Чтобы убрать эти права необходимо:
@@ -272,7 +284,7 @@ INSERT INTO t2 VALUES (2);
 
 41. При попытке CREATE TABLE t3(c1 integer); теперь должно получать ошибку - нет прав.
 
-В PostgreSQL 17.5, установленной на Oracle Linux 9, данных прав не было изначально.
+**В PostgreSQL 17.5, установленной на Oracle Linux 9, данных прав не было изначально.**
 
 42. Команда не выполняется, так как мы отозвали права CREATE у всех пользователей, что соответствует требованиям безопасности.
 
