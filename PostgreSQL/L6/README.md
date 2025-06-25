@@ -76,14 +76,16 @@ sudo chown postgres:postgres /var/lib/postgres/17
 Отредактируем файл конфигурации (для каждого кластера) :
 ```bash
 sudo nano /etc/postgresql/17/main/postgresql.conf
+sudo nano /etc/postgresql/17/main2/postgresql.conf
+sudo nano /etc/postgresql/17/1c_account/postgresql.conf
 ```
 
 Изменим параметр `data_directory`:
 ```
 data_directory = '/var/lib/postgres/17/main'
 ```
-![alt text](image-2.png)
-![alt text](image-3.png)
+![alt text](image-2.png) <br>
+![alt text](image-3.png) <br>
 ![alt text](image-4.png)
 
 Обновим systemd unit (если необходимо, для каждого кластера):
@@ -161,7 +163,7 @@ Environment=PGDATA=/var/lib/postgres/17/fast
 ```bash
 sudo pg_ctlcluster 17 fast start
 ```
-Проверьте статус:
+Проверим статус:
 ```bash
 sudo pg_lsclusters
 sudo systemctl status postgresql@17-fast
@@ -211,9 +213,8 @@ max_parallel_workers = 4              # Максимальное число па
 random_page_cost = 1.1                # Для SSD дисков
 effective_io_concurrency = 200        # Для SSD дисков
 ```
-pgtune предложил для нашего сервера следующие настройки,`Тест 2`:
+pgtune предложил для нашего сервера следующие настройки,`Тест 2`: <br>
 ![alt text](image-9.png)
-
 
 ```bash
 systemctl daemon-reload
@@ -299,22 +300,18 @@ tps = 1273.843034 (without initial connection time)
 
 Тест 2.2, с настройками, рекомендованными pgtune для Type: "Online transaction...", для баз 1С и не только, 20 подключений (чем меньше подключений, тем выше значение work_mem):
 
-![alt text](image-15.png)<br>
+![alt text](image-15.png) <br>
 ![alt text](image-17.png)
 
-Тест 2.3, с настройками, рекомендованными pgtune для Type: "Mix...", 20 подключений:
-![alt text](image-16.png)<br>
+Тест 2.3, с настройками, рекомендованными pgtune для Type: "Mix...", 20 подключений: <br>
+![alt text](image-16.png) <br>
 ![alt text](image-19.png)
 
-Тест 2.4, с настройками, рекомендованными pgtune для Type: "Mix...", 20 подключений, также изменю значение effective_io_concurrency = 20 (в тесте 2,3 = 200):
+Тест 2.4, с настройками, рекомендованными pgtune для Type: "Mix...", 20 подключений, также изменю значение effective_io_concurrency = 20 (в тесте 2,3 = 200): <br>
 ![alt text](image-20.png)
 
-Тест 2.5, с настройками, рекомендованными pgtune для Type: "Mix...", 20 подключений, оставлю значение effective_io_concurrency = 20 и изменю work_mem = 10280kB (2.4 = 87381kB):
-
+Тест 2.5, с настройками, рекомендованными pgtune для Type: "Mix...", 20 подключений, оставлю значение effective_io_concurrency = 20 и изменю work_mem = 10280kB (2.4 = 87381kB): <br>
 ![alt text](image-21.png)
-
-
-
 
 Обоснование ключевых параметров:
 
@@ -379,7 +376,7 @@ sudo -u postgres psql -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON
 #Проверка подключения:
 psql -U tpcc -d tpcc -c "\dn+ public"
 
-Также, чтобы не возникала ошибка `psql: error: connection to server on socket "/var/run/postgresql/.s.PGSQL.5432" failed: FATAL:  Peer authentication failed for user "tpcc""`, cоздайте соответствующего системного пользователя:
+Также, чтобы не возникала ошибка `psql: error: connection to server on socket "/var/run/postgresql/.s.PGSQL.5432" failed: FATAL:  Peer authentication failed for user "tpcc""`, cоздаём соответствующего системного пользователя:
 sudo adduser tpcc
 ```
 ![alt text](image-23.png)
@@ -399,7 +396,7 @@ lvextend -l +100%FREE /dev/mapper/ubuntu--vg-ubuntu--lv
 resize2fs /dev/mapper/ubuntu--vg-ubuntu--lv
 ```
 
-Указывает скрипту, что мы работаем в PostgreSQL:
+Указываем скрипту, что мы работаем в PostgreSQL, подготовка:
 ```bash
 ./tpcc.lua \
   --db-driver=pgsql \
@@ -413,8 +410,10 @@ resize2fs /dev/mapper/ubuntu--vg-ubuntu--lv
   --scale=10 \
   --use_fk=0 \
   prepare
-  
+  ```
+
   Ожидаем выполнения и запустим тест (пример для 10 складов):
+ ```bash
 ./tpcc.lua \
   --db-driver=pgsql \
   --pgsql-user=tpcc \
@@ -597,9 +596,7 @@ resize2fs /dev/mapper/ubuntu--vg-ubuntu--lv
 3. Добавить ОЗУ.
 4. Добавить CPU.
 5. Перейти на более быстрые диски.
----
-
-Если нужны более точные рекомендации — укажите конфигурацию сервера (CPU, RAM, тип диска) и текущие настройки PostgreSQL (`postgresql.conf`).
+6. Изменить текущие настройки PostgreSQL (`postgresql.conf`).
 
 ### Оптимизация PostgreSQL 17 для TPC-C теста (4 ядра, 8GB RAM, SSD M.2)
 
