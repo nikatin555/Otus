@@ -41,7 +41,7 @@
 ## Добавление репозитория PostgreSQL
 sudo dnf install -y https://download.postgresql.org/pub/repos/yum/reporpms/EL-9-x86_64/pgdg-redhat-repo-latest.noarch.rpm
 
-## Disable the built-in PostgreSQL module:
+## Отключить встроенный модуль PostgreSQL:
 ```bash
 sudo dnf -qy module disable postgresql
 ```

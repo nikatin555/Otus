@@ -340,6 +340,7 @@ VBoxManage modifyvm P7.Ubuntu --nested-hw-virt on
 «Включить Nested VT-x/AMD-V» в VirtualBox — это опция, позволяющая виртуальной машине (ВМ) использовать аппаратную виртуализацию не только на основном хосте, но и внутри самой гостевой ОС. 
 Для нашей VM это не нужно, но проверим результат: <br>
 ![alt text](image-12.png)
+
 с предложенными настройками`postgresql.conf`: tps = 1070.397884 <br>
 С default  `postgresql.conf`: tps = 1104.377960
 
