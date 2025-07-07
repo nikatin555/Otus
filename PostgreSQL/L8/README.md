@@ -185,7 +185,7 @@ sudo grep "checkpoint starting:" /var/log/postgresql/postgresql-17-main.log | gr
      - **Редкие точки** → выше производительность, но больше WAL при аварии.  
 
 
-#### 5. Сравнение TPS в синхронном и асинхронном режиме
+#### 5. Сравнение TPS в синхронном и асинхронном режимах
 
 1. **Синхронный режим** (по умолчанию):
 ```bash
@@ -284,7 +284,7 @@ tps = 1559.058581 (without initial connection time)
    sudo pg_ctlcluster 17 test_checksum_on stop
    ```
 
-4.  Bзменим файл таблицы:
+4.  Изменим файл таблицы:
 ```bash
 sudo dd if=/dev/zero of=$TABLE_FILE bs=1 count=1 seek=100 conv=notrunc
     ```
@@ -311,7 +311,6 @@ sudo dd if=/dev/zero of=$TABLE_FILE bs=1 count=1 seek=100 conv=notrunc
 
 6. **Что произойдёт?**  
    PostgreSQL не обнаружил повреждение данных, несмотря на включённые контрольные суммы.
-Отличный вопрос! Давайте разберёмся, почему PostgreSQL не обнаружил повреждение данных, несмотря на включённые контрольные суммы.
 
 **Причины:**
 
@@ -353,7 +352,7 @@ PostgreSQL обнаружил повреждение данных из-за не
 Это подтверждает, что механизм контрольных сумм работает корректно.
 
 7. **Как проигнорировать ошибку?**  
-   Можно временно отключить проверку (только для анализа!):
+#### 1. Можно временно отключить проверку (только для анализа!):
    ```bash
    sudo -u postgres psql -p $(sudo pg_lsclusters | grep test_checksum_on | awk '{print $3}') -c "SET ignore_checksum_failure TO on; SELECT * FROM test;"
    ```
@@ -383,6 +382,31 @@ sudo -u postgres psql -p $(sudo pg_lsclusters | grep test_checksum_on | awk '{pr
  on
 (1 row)
 ```
+#### 2. Постоянное включение (не рекомендуется для production)
+```sql
+ALTER SYSTEM SET ignore_checksum_failure = on;
+SELECT pg_reload_conf();
+```
+
+#### 3. Для конкретной таблицы через pg_resilient (если установлен)
+```sql
+SELECT pg_resilient_set_ignore_checksum('test', true);
+```
+
+#### 4. Экстренный доступ к данным (с риском повреждения)
+```sql
+BEGIN;
+SET LOCAL ignore_checksum_failure = on;
+-- Ваши операции с таблицей
+COMMIT;
+```
+
+#### Важные предупреждения:
+1. **Только для чтения**: Запись в поврежденные страницы может усугубить проблему
+2. **Журналирование**: Ошибки все равно будут записываться в логи
+3. **Временное решение**: После извлечения данных нужно восстановить кластер
+
+Для production-окружения рекомендуется полное восстановление из резервной копии.
 
 ### Выводы:
 - Контрольные точки влияют на генерацию WAL.
