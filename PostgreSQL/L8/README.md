@@ -397,7 +397,7 @@ SELECT pg_resilient_set_ignore_checksum('test', true);
 ```sql
 BEGIN;
 SET LOCAL ignore_checksum_failure = on;
--- Ваши операции с таблицей
+-- Операции с таблицей
 COMMIT;
 ```
 
