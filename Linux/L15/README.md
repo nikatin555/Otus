@@ -280,6 +280,9 @@ cd otus-linux-adm/selinux_dns_problems
 # Запускаем стенд (требуется установленный Vagrant) !!!!! Остановился тут!!!!
 vagrant up
 ```
+Логин: vagrant
+
+Пароль: vagrant
 
 ### Анализ проблемы
 
