@@ -40,7 +40,7 @@ https://docs.docker.com/engine/install/ubuntu/
 # Удаляем старые версии
 for pkg in docker.io docker-doc docker-compose docker-compose-v2 podman-docker containerd runc; do sudo apt-get remove $pkg; done
 ```
-1.Настройте apt репозиторий Docker:
+1.Настроем apt репозиторий Docker:
 ```bash
 # Устанавливаем зависимости
 sudo apt-get update
@@ -123,8 +123,6 @@ Docker Compose version v2.39.1
 sudo curl -L "https://github.com/docker/compose/releases/download/v2.23.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
 sudo chmod +x /usr/local/bin/docker-compose
 ```
-- Проверка: `docker-compose --version`
-
 **Основные различия:**
 
 | Характеристика       | Плагин (`docker compose`) | Отдельное приложение (`docker-compose`) |
@@ -137,7 +135,7 @@ sudo chmod +x /usr/local/bin/docker-compose
 
 **Что выбрать?**
 
-**Рекомендуется использовать плагин (`docker compose`), потому что:**
+**Рекомендуется использовать плагин (`docker compose`):**
 1. Это официально рекомендуемый способ от Docker
 2. Лучше интегрирован с Docker CLI
 3. Автоматически обновляется вместе с Docker
@@ -171,7 +169,7 @@ mkdir -p /etc/l19/custom-nginx
 touch /etc/l19/custom-nginx/{Dockerfile,index.html,nginx.conf}
 
 
-```
+```bash
 custom-nginx/
 ├── Dockerfile
 ├── index.html
@@ -261,9 +259,9 @@ curl http://localhost:8080
 
 Технически возможно собрать ядро Linux внутри контейнера, но это не имеет практического смысла, так как:
 
-1. Контейнеры используют ядро хостовой системы и не могут загрузить собственное ядро
-2. Даже если собрать ядро, его нельзя будет использовать из контейнера
-3. Для сборки ядра обычно требуются привилегии, которые могут нарушить безопасность контейнера
+1. Контейнеры используют ядро хостовой системы и не могут загрузить собственное ядро.
+2. Даже если собрать ядро, его нельзя будет использовать из контейнера.
+3. Для сборки ядра обычно требуются привилегии, которые могут нарушить безопасность контейнера.
 
 Если нужно работать с разными версиями ядра, лучше использовать виртуальные машины.
 
@@ -348,6 +346,7 @@ RUN chown -R redmine:redmine /usr/src/redmine/public/themes/my-theme
 ```
 
 После запуска (`docker compose up -d`) новая тема стала доступна в настройках Redmine. Все данные сохраняются в volumes и не теряются при перезапуске контейнеров.
+
 ![alt text](image-2.png)
 
 **Откроем Redmine в браузере**:
@@ -362,7 +361,8 @@ RUN chown -R redmine:redmine /usr/src/redmine/public/themes/my-theme
    - В верхнем меню: "Administration" → "Settings"
    - Выберим вкладку "Display"
    - В разделе "Theme" должен появиться наш кастомный вариант темы
-   ![alt text](image-4.png)
+
+  ![alt text](image-4.png)
 
 **Выбор темы** доступен.
 
@@ -378,7 +378,7 @@ RUN chown -R redmine:redmine /usr/src/redmine/public/themes/my-theme
 3. Убедимся, что:  
    - Тема осталась доступной  
    - Данные пользователей сохранились (я изменил пароль на новый, он остался темже, а не сбросился на стандартный)
-   - Задачи не пропали  
+  
    ![alt text](image-5.png)
 
 Для дополнительной проверки можно посмотреть список volumes:  
