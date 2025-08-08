@@ -167,8 +167,7 @@ alias docker-compose='docker compose'
 ```bash
 mkdir -p /etc/l19/custom-nginx
 touch /etc/l19/custom-nginx/{Dockerfile,index.html,nginx.conf}
-
-
+```
 ```bash
 custom-nginx/
 ├── Dockerfile
