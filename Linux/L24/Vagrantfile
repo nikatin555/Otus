@@ -1,0 +1,194 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+Vagrant.configure("2") do |config|
+  # Конфигурация для CentOS 8 Stream
+  config.vm.define "centos" do |centos|
+    centos.vm.box = "centos8s"
+    centos.vm.hostname = "centos-pam"
+    centos.vm.network "private_network", ip: "192.168.55.10"
+    
+    centos.vm.provider "virtualbox" do |vb|
+      vb.memory = "8192"
+      vb.cpus = "2"
+      # Указываем имя сети, которое не конфликтует с существующими
+      vb.customize ["modifyvm", :id, "--natnet1", "192.168.55.0/24"]
+    end
+    
+    centos.vm.provision "shell", inline: <<-SHELL
+      # Установка и настройка PAM
+      dnf install -y pam pam_script curl
+      # Установка Docker
+      sudo dnf config-manager --add-repo=https://download.docker.com/linux/centos/docker-ce.repo
+      sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+      # Добавление Docker в автозагрузку и запуск
+      sudo systemctl enable docker
+      sudo systemctl start docker
+      
+      #Разрешаем подключение пользователей по SSH с использованием пароля
+      sed -i 's/^PasswordAuthentication.*$/PasswordAuthentication yes/' /etc/ssh/sshd_config
+      #Перезапуск службы SSHD
+      systemctl restart sshd.service
+
+      # Скрипт проверки дня недели
+      tee /usr/local/bin/check_weekday.sh << 'EOF2'
+      #!/bin/bash
+      holidays=("2025-01-01" "2025-01-02" "2025-01-03" "2025-01-06" "2025-01-07" "2025-01-08" "2025-02-23" "2025-03-08" "2025-05-01" "2025-05-02" "2025-05-08" "2025-05-09" "2025-06-12" "2025-06-13" "2025-11-03" "2025-11-04" "2025-12-31")
+      today=$(date +%Y-%m-%d)
+      
+      for holiday in "${holidays[@]}"; do
+          if [[ "$holiday" == "$today" ]]; then
+              exit 1
+          fi
+      done
+      
+      day=$(date +%w)
+      if [[ "$day" == "0" || "$day" == "6" ]]; then
+          exit 0
+      else
+          exit 1
+      fi
+      EOF2
+      
+      chmod +x /usr/local/bin/check_weekday.sh
+      
+      # Настройка PAM
+      tee /etc/pam.d/sshd << 'EOF2'
+      #%PAM-1.0
+      auth       required     pam_sepermit.so
+      auth       substack     password-auth
+      auth       include      postlogin
+      account    required     pam_nologin.so
+      account    required     pam_exec.so /usr/local/bin/check_weekday.sh
+      account    include      password-auth
+      password   include      password-auth
+      session    include      password-auth
+      session    include      postlogin
+      EOF2
+      
+      #Создаём пользователя otusadm и otus
+      sudo useradd otusadm && sudo useradd otus
+      #Создаём пользователям пароли
+      cho "Otus2022!" | sudo passwd --stdin otusadm && echo "Otus2022!" | sudo passwd --stdin otus
+      #Создаём группу admin
+      sudo groupadd -f admin
+      #Добавляем пользователей vagrant,root и otusadm в группу admin
+      usermod otusadm -a -G admin && usermod root -a -G admin && usermod vagrant -a -G admin
+      #Проверим, что пользователи root, vagrant и otusadm есть в группе admin:
+      cat /etc/group | grep admin
+      
+      # Настройка Docker
+      useradd -m dockeruser
+      echo "dockeruser:password" | chpasswd
+      usermod -aG docker dockeruser
+      tee /etc/sudoers.d/dockeruser << 'EOF2'
+      dockeruser ALL=(root) NOPASSWD: /bin/systemctl restart docker.service
+      EOF2
+    SHELL
+  end
+
+  # Конфигурация для Ubuntu 22.04
+  config.vm.define "ubuntu" do |ubuntu|
+    ubuntu.vm.box = "ubuntu/22.04"
+    ubuntu.vm.hostname = "ubuntu-pam"
+    ubuntu.vm.network "private_network", ip: "192.168.55.20"
+    
+    ubuntu.vm.provider "virtualbox" do |vb|
+      vb.memory = "8192"
+      vb.cpus = "2"
+      vb.customize ["modifyvm", :id, "--natnet1", "192.168.55.0/24"]
+    end
+    
+       ubuntu.vm.provision "shell", inline: <<-SHELL
+      # Установка и настройка PAM
+      apt-get update
+      apt-get install -y libpam-script curl
+      # Установка Docker
+      sudo apt-get update
+      sudo apt-get install -y ca-certificates curl gnupg
+
+      # Добавляем официальный GPG ключ Docker
+      sudo install -m 0755 -d /etc/apt/keyrings
+      sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+      sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+      # Добавляем репозиторий
+      echo \
+      "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
+      $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}") stable" | \
+      sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+      sudo apt-get update
+
+      # Устанавливаем Docker
+      sudo apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+      sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+      # Добавление Docker в автозагрузку и запуск
+      sudo systemctl enable docker
+      sudo systemctl start docker
+
+      #Разрешаем подключение пользователей по SSH с использованием пароля
+      sed -i 's/^PasswordAuthentication.*$/PasswordAuthentication yes/' /etc/ssh/sshd_config
+      #Перезапуск службы SSHD
+      systemctl restart sshd.service
+      
+      # Скрипт проверки дня недели
+      tee /usr/local/bin/check_weekday.sh << 'EOF2'
+      #!/bin/bash
+      holidays=("2025-01-01" "2025-01-02" "2025-01-03" "2025-01-06" "2025-01-07" "2025-01-08" "2025-02-23" "2025-03-08" "2025-05-01" "2025-05-02" "2025-05-08" "2025-05-09" "2025-06-12" "2025-06-13" "2025-11-03" "2025-11-04" "2025-12-31")
+      today=$(date +%Y-%m-%d)
+      
+      for holiday in "${holidays[@]}"; do
+          if [[ "$holiday" == "$today" ]]; then
+              exit 1
+          fi
+      done
+      
+      day=$(date +%w)
+      if [[ "$day" == "0" || "$day" == "6" ]]; then
+          exit 0
+      else
+          exit 1
+      fi
+      EOF2
+      
+      chmod +x /usr/local/bin/check_weekday.sh
+      
+      # Настройка PAM
+      tee /etc/pam.d/sshd << 'EOF2'
+      # PAM configuration for the Secure Shell service
+      auth       required     pam_env.so
+      auth       required     pam_env.so envfile=/etc/default/locale
+      @include common-auth
+      account    required     pam_nologin.so
+      account    required     pam_exec.so /usr/local/bin/check_weekday.sh
+      @include common-account
+      @include common-session
+      session    optional     pam_motd.so
+      session    optional     pam_mail.so standard noenv
+      session    required     pam_limits.so
+      @include common-password
+      EOF2
+      
+      #Создаём пользователя otusadm и otus
+      sudo useradd otusadm && sudo useradd otus
+      #Создаём пользователям пароли
+      cho "Otus2022!" | sudo passwd --stdin otusadm && echo "Otus2022!" | sudo passwd --stdin otus
+      #Создаём группу admin
+      sudo groupadd -f admin
+      #Добавляем пользователей vagrant,root и otusadm в группу admin
+      usermod otusadm -a -G admin && usermod root -a -G admin && usermod vagrant -a -G admin
+      #Проверим, что пользователи root, vagrant и otusadm есть в группе admin:
+      cat /etc/group | grep admin
+      
+      # Настройка Docker
+      useradd -m dockeruser
+      echo "dockeruser:password" | chpasswd
+      usermod -aG docker dockeruser
+      tee /etc/sudoers.d/dockeruser << 'EOF2'
+      dockeruser ALL=(root) NOPASSWD: /bin/systemctl restart docker.service
+      EOF2
+    SHELL
+  end
+end
