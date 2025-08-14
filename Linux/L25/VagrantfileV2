@@ -1,0 +1,88 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+ENV['VAGRANT_SERVER_URL'] = 'https://vagrant.elab.pro'
+
+Vagrant.configure("2") do |config|
+  config.vm.box = "ubuntu/jammy64"
+  
+  # Общие настройки для всех машин
+  config.vm.provider "virtualbox" do |vb|
+    vb.memory = 4096
+    vb.cpus = 2
+    vb.customize ["modifyvm", :id, "--pae", "on"]
+    vb.customize ["modifyvm", :id, "--vram", "32"]
+    vb.customize ["modifyvm", :id, "--natdnsproxy1", "on"]
+    vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+  end
+
+  # Машина web
+  config.vm.define "web" do |web|
+    web.vm.hostname = "web"
+    web.vm.network "private_network", ip: "192.168.56.11"
+    # Только базовая настройка, остальное через Ansible
+    web.vm.provision "shell", inline: <<-SHELL
+      apt-get update
+      apt-get install -y python3
+    SHELL
+  end
+
+  # Машина log
+  config.vm.define "log" do |log|
+    log.vm.hostname = "log"
+    log.vm.network "private_network", ip: "192.168.56.12"
+    log.vm.provision "shell", inline: <<-SHELL
+      apt-get update
+      apt-get install -y python3
+    SHELL
+  end
+
+  # Машина elk
+  config.vm.define "elk" do |elk|
+    elk.vm.hostname = "elk"
+    elk.vm.network "private_network", ip: "192.168.56.13"
+    elk.vm.provider "virtualbox" do |vb|
+      vb.memory = 6144
+      vb.cpus = 4
+    end
+    elk.vm.provision "shell", inline: <<-SHELL
+      apt-get update
+      apt-get install -y python3
+    SHELL
+  end
+end
+
+# Настройка провижининга Ansible для всех машин
+  config.vm.provision "ansible" do |ansible|
+    ansible.playbook = "ansible/playbook.yml"
+    ansible.inventory_path = "ansible/inventory.ini"
+    ansible.become = true
+    ansible.limit = "all"
+    ansible.verbose = "v"
+    ansible.extra_vars = {
+      ansible_ssh_user: 'vagrant',
+      ansible_python_interpreter: "/usr/bin/python3"
+    }
+    
+    # Опционально: отключить host key checking
+    ansible.raw_arguments = [
+      "--ssh-common-args='-o StrictHostKeyChecking=no'"
+    ]
+  end
+
+  # Пост-провижининг (опционально)
+  config.vm.post_up_message = <<-MESSAGE
+  Система успешно развернута!
+  Доступ к машинам:
+    - web: 192.168.56.11
+    - log: 192.168.56.12
+    - elk: 192.168.56.13
+  
+  Для доступа используем:
+    vagrant ssh web
+    vagrant ssh log
+    vagrant ssh elk
+  
+  Kibana доступна по адресу: http://192.168.56.13:5601
+  MESSAGE
+end

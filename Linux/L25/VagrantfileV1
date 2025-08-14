@@ -1,0 +1,281 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+# Использование зеркала Vagrant репозиториев для РФ
+ENV['VAGRANT_SERVER_URL'] = 'https://vagrant.elab.pro'
+
+Vagrant.configure("2") do |config|
+  # Общие настройки для всех машин
+  config.vm.box = "ubuntu/jammy64"
+   config.vm.provider "virtualbox" do |vb|
+    vb.memory = 4096
+    vb.cpus = 2
+    vb.customize ["modifyvm", :id, "--pae", "on"]
+    vb.customize ["modifyvm", :id, "--vram", "32"]
+  end
+  config.vm.provision "shell", inline: <<-SHELL
+    apt-get update
+    apt-get install -y apt-transport-https ca-certificates curl software-properties-common
+  SHELL
+
+  # Машина web с nginx
+  config.vm.define "web" do |web|
+    web.vm.hostname = "web"
+    web.vm.network "private_network", ip: "192.168.56.11"
+    
+    web.vm.provision "shell", inline: <<-SHELL
+      # Установка nginx
+      apt install -y nginx
+      systemctl enable nginx
+      systemctl start nginx
+      
+      # Настройка журналирования для nginx
+      mkdir -p /var/log/nginx/remote
+      chown www-data:adm /var/log/nginx/remote
+      
+      # Создаем конфиг для отправки логов
+      cat <<EOF > /etc/rsyslog.d/60-nginx.conf
+      module(load="imfile" PollingInterval="10")
+      
+      # Локальное хранение только критичных логов
+      if \$syslogseverity <= 2 then {
+        action(type="omfile" file="/var/log/nginx/critical.log")
+      }
+      
+      # Отправка всех логов nginx на удаленный сервер
+      input(type="imfile"
+        File="/var/log/nginx/access.log"
+        Tag="nginx-access"
+        Severity="info"
+        Facility="local6")
+      
+      input(type="imfile"
+        File="/var/log/nginx/error.log"
+        Tag="nginx-error"
+        Severity="error"
+        Facility="local6")
+      
+      local6.* @@192.168.56.12:514
+      EOF
+      
+      # Настройка отправки критичных логов в journald
+      cat <<EOF > /etc/systemd/journald.conf.d/remote.conf
+      [Journal]
+      ForwardToSyslog=yes
+      MaxLevelSyslog=crit
+      EOF
+      
+      # Установка и настройка аудита
+      apt install -y auditd
+      cat <<EOF > /etc/audit/rules.d/nginx.rules
+      -w /etc/nginx/ -p wa -k nginx-config
+      -w /etc/nginx/nginx.conf -p wa -k nginx-config
+      -w /etc/nginx/sites-available/ -p wa -k nginx-config
+      -w /etc/nginx/sites-enabled/ -p wa -k nginx-config
+      EOF
+      augenrules --load
+      systemctl restart auditd
+      
+      # Настройка отправки логов аудита
+      cat <<EOF > /etc/audit/plugins.d/syslog.conf
+      active = yes
+      direction = out
+      path = builtin_syslog
+      type = builtin 
+      args = LOG_LOCAL6
+      format = string
+      EOF
+      
+      # Перенаправление логов аудита на удаленный сервер
+      echo 'local6.* @@192.168.56.12:514' >> /etc/rsyslog.d/60-audit.conf
+      
+      # Перезапуск сервисов
+      systemctl restart systemd-journald
+      systemctl restart rsyslog
+    SHELL
+  end
+
+  # Машина log с journald
+  config.vm.define "log" do |log|
+    log.vm.hostname = "log"
+    log.vm.network "private_network", ip: "192.168.56.12"
+    
+    log.vm.provision "shell", inline: <<-SHELL
+      # Настройка journald как центрального лог-сервера
+      mkdir -p /var/log/journal
+      chown root:systemd-journal /var/log/journal
+      chmod 2755 /var/log/journal
+      
+      cat <<EOF > /etc/systemd/journald.conf
+      [Journal]
+      Storage=persistent
+      ForwardToSyslog=no
+      MaxLevelStore=debug
+      MaxLevelSyslog=debug
+      MaxLevelKMsg=notice
+      MaxLevelConsole=info
+      MaxLevelWall=emerg
+      Compress=yes
+      Seal=yes
+      SplitMode=uid
+      SyncIntervalSec=5m
+      RateLimitInterval=30s
+      RateLimitBurst=1000
+      SystemMaxUse=1G
+      SystemKeepFree=200M
+      SystemMaxFileSize=100M
+      RuntimeMaxUse=100M
+      RuntimeKeepFree=50M
+      RuntimeMaxFileSize=50M
+      EOF
+      
+      # Настройка rsyslog для приема удаленных логов
+      apt install -y rsyslog
+      
+      cat <<EOF > /etc/rsyslog.conf
+      module(load="imuxsock") # provides support for local system logging
+      module(load="imklog")   # provides kernel logging support
+      module(load="imudp")
+      module(load="imtcp")
+      
+      input(type="imudp" port="514")
+      input(type="imtcp" port="514")
+      
+      \$template RemoteLogs,"/var/log/remote/%HOSTNAME%/%PROGRAMNAME%.log"
+      *.* ?RemoteLogs
+      & ~
+      
+      \$ActionFileDefaultTemplate RSYSLOG_TraditionalFileFormat
+      \$IncludeConfig /etc/rsyslog.d/*.conf
+      \$FileOwner syslog
+      \$FileGroup adm
+      \$FileCreateMode 0640
+      \$DirCreateMode 0755
+      \$Umask 0022
+      EOF
+      
+      # Создаем директории для логов
+      mkdir -p /var/log/remote
+      chown syslog:adm /var/log/remote
+      
+      # Перезапуск сервисов
+      systemctl restart systemd-journald
+      systemctl restart rsyslog
+    SHELL
+  end
+
+  # Дополнительная машина ELK (задание со звездочкой)
+  config.vm.define "elk" do |elk|
+    elk.vm.hostname = "elk"
+    elk.vm.network "private_network", ip: "192.168.56.13"
+    elk.vm.provider "virtualbox" do |vb|
+      vb.memory = "6144"
+      vb.cpus = 2
+    end
+    
+    elk.vm.provision "shell", inline: <<-SHELL
+      # Установка Docker для ELK
+      curl -fsSL https://get.docker.com -o get-docker.sh
+      sh get-docker.sh
+      usermod -aG docker vagrant
+      
+      # Установка Docker Compose
+      curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+      chmod +x /usr/local/bin/docker-compose
+      
+      # Создаем docker-compose.yml для ELK
+      mkdir -p /opt/elk
+      cat <<EOF > /opt/elk/docker-compose.yml
+      version: '3'
+      services:
+        elasticsearch:
+          image: docker.elastic.co/elasticsearch/elasticsearch:9.1.2
+          container_name: elasticsearch
+          environment:
+            - discovery.type=single-node
+            - bootstrap.memory_lock=true
+            - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+          ulimits:
+            memlock:
+              soft: -1
+              hard: -1
+          volumes:
+            - es_data:/usr/share/elasticsearch/data
+          ports:
+            - 9200:9200
+          networks:
+            - elk
+          
+        logstash:
+          image: docker.elastic.co/logstash/logstash:9.1.2
+          container_name: logstash
+          volumes:
+            - ./logstash.conf:/usr/share/logstash/pipeline/logstash.conf
+          ports:
+            - 5044:5044
+            - 5000:5000/tcp
+            - 5000:5000/udp
+          environment:
+            LS_JAVA_OPTS: "-Xmx256m -Xms256m"
+          networks:
+            - elk
+          depends_on:
+            - elasticsearch
+            
+        kibana:
+          image: docker.elastic.co/kibana/kibana:9.1.2
+          container_name: kibana
+          ports:
+            - 5601:5601
+          networks:
+            - elk
+          depends_on:
+            - elasticsearch
+            
+      volumes:
+        es_data:
+          
+      networks:
+        elk:
+          driver: bridge
+      EOF
+      
+      # Конфиг Logstash для приема логов nginx
+      cat <<EOF > /opt/elk/logstash.conf
+      input {
+        tcp {
+          port => 5000
+          type => "nginx"
+        }
+      }
+      
+      filter {
+        if [type] == "nginx" {
+          grok {
+            match => { "message" => "%{COMBINEDAPACHELOG}" }
+          }
+          date {
+            match => [ "timestamp", "dd/MMM/yyyy:HH:mm:ss Z" ]
+            remove_field => [ "timestamp" ]
+          }
+        }
+      }
+      
+      output {
+        elasticsearch {
+          hosts => ["elasticsearch:9200"]
+          index => "nginx-%{+YYYY.MM.dd}"
+        }
+      }
+      EOF
+      
+      # Запуск ELK
+      cd /opt/elk && docker-compose up -d
+      
+      # На машине web нужно перенаправить логи nginx еще и на ELK
+      # Это можно сделать вручную после развертывания:
+      # На машине web выполнить:
+      # echo 'local6.* @@192.168.56.13:5000' >> /etc/rsyslog.d/70-elastic.conf
+      # systemctl restart rsyslog
+    SHELL
+  end
+end
