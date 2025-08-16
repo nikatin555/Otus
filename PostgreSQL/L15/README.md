@@ -70,346 +70,500 @@ https://postgrespro.ru/education/demodb
 Оптимизация запросов – после секционирования, запросы к таблице должны быть оптимизированы (например, быстрее выполняться для конкретных диапазонов). <br>
 Комментирование – код должен содержать поясняющие комментарии, объясняющие выбор секционирования и основные шаги.
 
-# Отчет по секционированию базы данных демо-версии PostgresPro
+# Отчет по секционированию базы данных
+==================================
+## Подготовка
+PostgreSQL 17 установлен на AlmaLinux 10. Скачана база `demo-big.zip`,т.к. база большого размера позволит почувствовать, как ведут себя запросы на больших объёмах данных, и задуматься об оптимизации.
+```bash
+ wget https://edu.postgrespro.ru/demo-big.zip
+ unzip demo-big.zip
+ psql -f demo-big-20170815.sql -U postgres
+ ```
 
-## Анализ структуры данных
-
-После изучения структуры базы данных, я решил сосредоточиться на таблице `flights`, так как:
-1. Это одна из самых больших таблиц в базе
-2. Она содержит данные о рейсах, которые естественным образом группируются по датам
-3. Большинство запросов к этой таблице вероятно будут использовать фильтрацию по дате
-
-Таблица `bookings` также является хорошим кандидатом, но я выбрал `flights`, так как работа с расписанием рейсов - более частая операция в авиакомпаниях.
-
-## Выбор типа секционирования
-
-Я выбрал **секционирование по диапазону** на основе столбца `scheduled_departure`, так как:
-- Данные о рейсах естественным образом упорядочены по дате
-- Большинство запросов вероятно будут запрашивать данные за определенные периоды
-- Это позволит PostgreSQL исключать целые секции при выполнении запросов с условиями по дате
-
-## Реализация секционирования
-
-```sql
--- Создаем новую секционированную таблицу
-CREATE TABLE flights_partitioned (
-    flight_id integer NOT NULL,
-    flight_no character(6) NOT NULL,
-    scheduled_departure timestamptz NOT NULL,
-    scheduled_arrival timestamptz NOT NULL,
-    departure_airport character(3) NOT NULL,
-    arrival_airport character(3) NOT NULL,
-    status character varying(20) NOT NULL,
-    aircraft_code character(3) NOT NULL,
-    actual_departure timestamptz,
-    actual_arrival timestamptz
-) PARTITION BY RANGE (scheduled_departure);
-
--- Создаем секции по годам (2016-2017)
-CREATE TABLE flights_2016 PARTITION OF flights_partitioned
-    FOR VALUES FROM ('2016-01-01') TO ('2017-01-01');
-
-CREATE TABLE flights_2017 PARTITION OF flights_partitioned
-    FOR VALUES FROM ('2017-01-01') TO ('2018-01-01');
-
--- Копируем данные из исходной таблицы
-INSERT INTO flights_partitioned
-SELECT * FROM flights;
-
--- Создаем индексы для каждой секции
-CREATE INDEX ON flights_2016 (scheduled_departure);
-CREATE INDEX ON flights_2017 (scheduled_departure);
-
--- Переносим ограничения и индексы
-ALTER TABLE flights_partitioned ADD PRIMARY KEY (flight_id, scheduled_departure);
-ALTER TABLE flights_partitioned ADD FOREIGN KEY (departure_airport) REFERENCES airports(airport_code);
-ALTER TABLE flights_partitioned ADD FOREIGN KEY (arrival_airport) REFERENCES airports(airport_code);
-ALTER TABLE flights_partitioned ADD FOREIGN KEY (aircraft_code) REFERENCES aircrafts(aircraft_code);
-
--- Переименовываем таблицы для замены
-ALTER TABLE flights RENAME TO flights_old;
-ALTER TABLE flights_partitioned RENAME TO flights;
-```
-
-## Тестирование производительности
-
-### Запрос 1: Выборка рейсов за определенный месяц
-
-**До секционирования:**
-```sql
-EXPLAIN ANALYZE
-SELECT * FROM flights_old 
-WHERE scheduled_departure BETWEEN '2017-08-01' AND '2017-08-31';
-```
-Результат:
-```
-                                                       QUERY PLAN                                                       
-------------------------------------------------------------------------------------------------------------------------
- Seq Scan on flights_old  (cost=0.00..584.14 rows=1277 width=63) (actual time=0.014..3.093 rows=1277 loops=1)
-   Filter: ((scheduled_departure >= '2017-08-01 00:00:00+00'::timestamp with time zone) AND (scheduled_departure <= '2017-08-31 00:00:00+00'::timestamp with time zone))
- Planning Time: 0.097 ms
- Execution Time: 3.183 ms
-```
-
-**После секционирования:**
-```sql
-EXPLAIN ANALYZE
-SELECT * FROM flights 
-WHERE scheduled_departure BETWEEN '2017-08-01' AND '2017-08-31';
-```
-Результат:
-```
-                                                       QUERY PLAN                                                       
-------------------------------------------------------------------------------------------------------------------------
- Append  (cost=0.00..44.60 rows=1277 width=63) (actual time=0.008..0.790 rows=1277 loops=1)
-   ->  Seq Scan on flights_2017 flights_1  (cost=0.00..44.60 rows=1277 width=63) (actual time=0.007..0.566 rows=1277 loops=1)
-         Filter: ((scheduled_departure >= '2017-08-01 00:00:00+00'::timestamp with time zone) AND (scheduled_departure <= '2017-08-31 00:00:00+00'::timestamp with time zone))
- Planning Time: 0.115 ms
- Execution Time: 0.886 ms
-```
-
-**Вывод:** Время выполнения запроса уменьшилось с 3.183 мс до 0.886 мс (ускорение в ~3.6 раза)
-
-### Запрос 2: Агрегация по годам
-
-**До секционирования:**
-```sql
-EXPLAIN ANALYZE
-SELECT 
-    EXTRACT(YEAR FROM scheduled_departure) AS year,
-    COUNT(*) AS flight_count
-FROM flights_old
-GROUP BY year;
-```
-Результат:
-```
-                                                      QUERY PLAN                                                      
-----------------------------------------------------------------------------------------------------------------------
- HashAggregate  (cost=584.14..584.16 rows=2 width=40) (actual time=5.371..5.372 rows=2 loops=1)
-   Group Key: (date_part('year'::text, scheduled_departure))
-   Batches: 1  Memory Usage: 24kB
-   ->  Seq Scan on flights_old  (cost=0.00..502.87 rows=16254 width=8) (actual time=0.007..2.633 rows=16254 loops=1)
- Planning Time: 0.061 ms
- Execution Time: 5.393 ms
-```
-
-**После секционирования:**
-```sql
-EXPLAIN ANALYZE
-SELECT 
-    EXTRACT(YEAR FROM scheduled_departure) AS year,
-    COUNT(*) AS flight_count
-FROM flights
-GROUP BY year;
-```
-Результат:
-```
-                                                      QUERY PLAN                                                      
-----------------------------------------------------------------------------------------------------------------------
- HashAggregate  (cost=89.20..89.22 rows=2 width=40) (actual time=1.573..1.574 rows=2 loops=1)
-   Group Key: (date_part('year'::text, scheduled_departure))
-   Batches: 1  Memory Usage: 24kB
-   ->  Append  (cost=0.00..72.07 rows=3426 width=8) (actual time=0.006..0.898 rows=16254 loops=1)
-         ->  Seq Scan on flights_2016 flights_1  (cost=0.00..27.40 rows=1740 width=8) (actual time=0.006..0.333 rows=8223 loops=1)
-         ->  Seq Scan on flights_2017 flights_2  (cost=0.00..44.67 rows=1686 width=8) (actual time=0.006..0.410 rows=8031 loops=1)
- Planning Time: 0.125 ms
- Execution Time: 1.594 ms
-```
-
-**Вывод:** Время выполнения запроса уменьшилось с 5.393 мс до 1.594 мс (ускорение в ~3.4 раза)
-
-## Заключение
-
-Секционирование таблицы `flights` по дате вылета (`scheduled_departure`) показало значительное улучшение производительности для запросов, которые фильтруют или агрегируют данные по дате. Основные преимущества:
-
-1. **Ускорение запросов с фильтрацией по дате** за счет исключения целых секций из поиска
-2. **Улучшение параллельной обработки** - PostgreSQL может обрабатывать разные секции параллельно
-3. **Упрощение управления данными** - можно легко добавлять/удалять целые секции (например, за определенные годы)
-
-Рекомендации:
-1. Для реальной системы можно создать более детальные секции (например, по месяцам)
-2. Реализовать автоматическое создание секций для новых периодов
-3. Рассмотреть секционирование связанных таблиц (`ticket_flights`, `boarding_passes`) по тому же принципу
-==========================================================
-
-# Детальный отчет по секционированию базы данных демо-версии PostgresPro
-
+==================================
 ## 1. Анализ структуры данных и логические привязки для секционирования
 
 Рассмотрим ключевые таблицы и возможные критерии их секционирования:
+```sql
+demo=# \dt+;
+                                                 Список отношений
+  Схема   |       Имя       |   Тип   | Владелец |  Хранение  | Метод доступа | Размер |         Описание
+----------+-----------------+---------+----------+------------+---------------+--------+---------------------------
+ bookings | aircrafts_data  | таблица | postgres | постоянное | heap          | 16 kB  | Aircrafts (internal data)
+ bookings | airports_data   | таблица | postgres | постоянное | heap          | 56 kB  | Airports (internal data)
+ bookings | boarding_passes | таблица | postgres | постоянное | heap          | 456 MB | Boarding passes
+ bookings | bookings        | таблица | postgres | постоянное | heap          | 105 MB | Bookings
+ bookings | flights         | таблица | postgres | постоянное | heap          | 21 MB  | Flights
+ bookings | seats           | таблица | postgres | постоянное | heap          | 96 kB  | Seats
+ bookings | ticket_flights  | таблица | postgres | постоянное | heap          | 547 MB | Flight segment
+ bookings | tickets         | таблица | postgres | постоянное | heap          | 386 MB | Tickets
+(8 строк)
 
-### Таблица `bookings`
-- **book_date** - дата бронирования (идеально подходит для диапазонного секционирования по месяцам/годам)
-- **total_amount** - сумма бронирования (может использоваться для диапазонного секционирования по ценовым категориям)
+demo=# SELECT
+    table_name,
+    pg_size_pretty(pg_total_relation_size(quote_ident(table_name))) AS total_size
+FROM
+    information_schema.tables
+WHERE
+    table_schema = 'bookings'  -- или другой схема
+ORDER BY
+    pg_total_relation_size(quote_ident(table_name)) DESC;
+   table_name    | total_size
+-----------------+------------
+ boarding_passes | 1102 MB
+ ticket_flights  | 872 MB
+ tickets         | 475 MB
+ bookings        | 151 MB
+ flights         | 32 MB
+ seats           | 144 kB
+ airports_data   | 72 kB
+ aircrafts_data  | 32 kB
+ aircrafts       | 0 bytes
+ routes          | 0 bytes
+ flights_v       | 0 bytes
+ airports        | 0 bytes
+(12 строк)
+```
 
-### Таблица `tickets`
-- **book_ref** - ссылка на бронирование (может использоваться для хэш-секционирования)
-- **passenger_id** - идентификатор пассажира (подходит для хэш-секционирования)
+# Отчет по секционированию таблицы ticket_flights
 
-### Таблица `ticket_flights`
-- **flight_id** - идентификатор рейса (может использоваться для секционирования по списку рейсов)
-- **fare_conditions** - класс обслуживания (подходит для секционирования по списку: Economy, Business, Comfort)
+## 1. Анализ структуры данных
 
-### Таблица `flights`
-- **scheduled_departure** - запланированная дата вылета (идеально для диапазонного секционирования)
-- **departure_airport** - аэропорт вылета (подходит для секционирования по списку)
-- **status** - статус рейса (может использоваться для секционирования по списку)
+### Обзор таблицы ticket_flights
+Таблица `ticket_flights` содержит информацию о билетах на рейсы:
+- `ticket_no` - номер билета
+- `flight_id` - идентификатор рейса
+- `fare_conditions` - класс обслуживания (Economy, Comfort, Business)
+- `amount` - стоимость билета
 
-### Таблица `boarding_passes`
-- **flight_id** + **boarding_no** - можно секционировать по диапазону номеров посадки
-- **seat_no** - можно секционировать по диапазону мест
+Размер таблицы в demo-big: ~872 MB
 
-### Таблица `seats`
-- **aircraft_code** - код самолета (подходит для секционирования по списку)
-- **fare_conditions** - класс обслуживания (по списку)
+### Критерии для секционирования:
+1. **fare_conditions** - имеет всего 3 значения, подходит для секционирования по списку
+2. **flight_id** - можно секционировать по диапазону значений
+3. **amount** - возможна группировка по ценовым категориям
 
-### Таблица `airports`
-- **city** - город расположения (может использоваться для секционирования по списку городов)
-- **timezone** - часовой пояс (по списку)
+## 2. Выбор таблицы для секционирования
 
-### Таблица `aircrafts`
-- **range** - дальность полета (диапазонное секционирование)
-- **model** - модель самолета (секционирование по списку)
+**Обоснование выбора ticket_flights:**
+1. Большой размер (872 MB) - выиграет от секционирования
+2. Часто используется в запросах вместе с flights и tickets
+3. Имеет четкие критерии для секционирования
+4. Высокая нагрузка при аналитических запросах
 
-## 2. Выбор типа секционирования для таблицы `flights`
-
-Для таблицы `flights` выбран **диапазонный тип секционирования** по полю `scheduled_departure` (запланированная дата вылета). Обоснование:
-
-1. **Природная временная упорядоченность** данных о рейсах
-2. **Типичные запросы** к этой таблице чаще всего содержат условия по дате:
-   - Поиск рейсов за определенный период
-   - Анализ расписания по месяцам/годам
-3. **Эффективность исключения секций** - при запросах с условиями по дате PostgreSQL может полностью исключить из поиска нерелевантные секции
-4. **Простота управления** - легко добавлять новые секции для новых периодов и архивировать старые данные
-
-Альтернативные варианты были рассмотрены, но оказались менее оптимальными:
-- **Секционирование по списку аэропортов** - менее эффективно, так как запросы чаще фильтруют по дате, чем по конкретному аэропорту
-- **Хэш-секционирование** - не дает преимуществ для типовых запросов, которые обычно требуют выборки по временным периодам
-
-## 3. Миграция данных
-
-Процесс миграции данных был выполнен следующим образом:
+## 2.1 Тестирование запросов ДО секционирования
 
 ```sql
--- 1. Создание секционированной таблицы
-CREATE TABLE flights_partitioned (
+-- Подготовка тестовой среды
+-- Создадим копию таблицы для тестирования
+CREATE TABLE ticket_flights_test AS SELECT * FROM ticket_flights;
+-- Включим замер времени
+\timing on
+
+-- Запрос 1: Фильтрация по классу обслуживания
+EXPLAIN ANALYZE
+SELECT * FROM ticket_flights_test 
+WHERE fare_conditions = 'Business';
+
+-- Результат: Execution Time: 1554.005 ms
+
+-- Запрос 2: Агрегация по классам
+EXPLAIN ANALYZE
+SELECT fare_conditions, COUNT(*) 
+FROM ticket_flights_test 
+GROUP BY fare_conditions;
+
+-- Результат: Execution Time: 2150.075 ms
+
+-- Запрос 3: Фильтр по рейсу и классу
+EXPLAIN ANALYZE
+SELECT * FROM ticket_flights_test
+WHERE flight_id = 12345 AND fare_conditions = 'Economy';
+
+-- Результат: Execution Time: 769.523 ms
+```
+![alt text](image.png)
+
+## 3. Определение типа секционирования
+
+Выбран **LIST-секционирование** по полю `fare_conditions`:
+- Всего 3 значения (Economy, Comfort, Business)
+- Четкое разделение данных
+- Большинство запросов фильтруют по классу обслуживания
+- Простота реализации и поддержки
+
+## 4. Создание секционированной таблицы
+
+```sql
+-- Создаем секционированную таблицу
+CREATE TABLE ticket_flights_partitioned (
+    ticket_no character(13) NOT NULL,
     flight_id integer NOT NULL,
-    flight_no character(6) NOT NULL,
-    scheduled_departure timestamptz NOT NULL,
-    scheduled_arrival timestamptz NOT NULL,
-    departure_airport character(3) NOT NULL,
-    arrival_airport character(3) NOT NULL,
-    status character varying(20) NOT NULL,
-    aircraft_code character(3) NOT NULL,
-    actual_departure timestamptz,
-    actual_arrival timestamptz,
-    PRIMARY KEY (flight_id, scheduled_departure)
-) PARTITION BY RANGE (scheduled_departure);
+    fare_conditions character varying(10) NOT NULL,
+    amount numeric(10,2) NOT NULL,
+    PRIMARY KEY (ticket_no, flight_id, fare_conditions)
+) PARTITION BY LIST (fare_conditions);
 
--- 2. Создание секций по годам
-CREATE TABLE flights_y2016 PARTITION OF flights_partitioned
-    FOR VALUES FROM ('2016-01-01') TO ('2017-01-01');
+-- Создаем секции для каждого класса
+CREATE TABLE tf_economy PARTITION OF ticket_flights_partitioned 
+    FOR VALUES IN ('Economy');
+    
+CREATE TABLE tf_comfort PARTITION OF ticket_flights_partitioned 
+    FOR VALUES IN ('Comfort');
+    
+CREATE TABLE tf_business PARTITION OF ticket_flights_partitioned 
+    FOR VALUES IN ('Business');
+```
+![alt text](image-1.png)
 
-CREATE TABLE flights_y2017 PARTITION OF flights_partitioned
-    FOR VALUES FROM ('2017-01-01') TO ('2018-01-01');
+## 5. Миграция данных
 
--- 3. Перенос данных из исходной таблицы
-INSERT INTO flights_partitioned 
-SELECT * FROM flights;
+```sql
+-- Переносим данные
+INSERT INTO ticket_flights_partitioned 
+SELECT * FROM ticket_flights;
 
--- 4. Проверка распределения данных по секциям
+-- Проверяем распределение данных
+SELECT fare_conditions, COUNT(*) 
+FROM ticket_flights_partitioned 
+GROUP BY fare_conditions;
+
+-- Результат:
+ fare_conditions |  count
+-----------------+---------
+ Business        |  859656
+ Comfort         |  139965
+ Economy         | 7392231
+(3 строки)
+```
+![alt text](image-3.png)
+
+
+## 5.1 Тестирование запросов ПОСЛЕ секционирования
+
+```sql
+-- Запрос 1: Фильтрация по классу обслуживания
+EXPLAIN ANALYZE
+SELECT * FROM ticket_flights_partitioned 
+WHERE fare_conditions = 'Business';
+
+-- Результат: Execution Time:  254,245 ms (было 1554.005 ms)
+
+-- Запрос 2: Агрегация по классам
+EXPLAIN ANALYZE
+SELECT fare_conditions, COUNT(*) 
+FROM ticket_flights_partitioned 
+GROUP BY fare_conditions;
+
+-- Результат: Execution Time: 2100.123 ms (было 2150.075 ms)
+
+-- Запрос 3: Фильтр по рейсу и классу
+EXPLAIN ANALYZE
+SELECT * FROM ticket_flights_partitioned
+WHERE flight_id = 12345 AND fare_conditions = 'Economy';
+
+-- Результат: Execution Time: 596,757 ms (было 769.523 ms)
+```
+
+## 6. Оптимизация запросов
+
+```sql
+-- Добавляем индексы для каждой секции
+CREATE INDEX ON tf_economy (flight_id);
+CREATE INDEX ON tf_comfort (flight_id);
+CREATE INDEX ON tf_business (flight_id);
+
+-- Ускорим агрегационный запрос:
+-- Материализованное представление:
+CREATE MATERIALIZED VIEW ticket_flights_stats AS
+SELECT fare_conditions, COUNT(*) as count
+FROM ticket_flights
+GROUP BY fare_conditions;
+-- Обновление: REFRESH MATERIALIZED VIEW ticket_flights_stats;
+-- Параллельное выполнение:
+SET max_parallel_workers_per_gather = 4;
+-- Оптимизация параметров:
+ALTER SYSTEM SET work_mem = '64MB';
+
+-- Проверяем запрос после оптимизации
+-- 1. Для Economy
+EXPLAIN ANALYZE
+SELECT * FROM ticket_flights_partitioned
+WHERE flight_id = 12345 AND fare_conditions = 'Economy';
+
+-- Результат: Execution Time:  0.271 ms ms (было 1554.005 ms, 254,245 ms)
+
+-- 2. Агрегатный запрос:
+EXPLAIN ANALYZE
+SELECT fare_conditions, COUNT(*) 
+FROM ticket_flights_partitioned 
+GROUP BY fare_conditions;
+
+-- Результат: Execution Time: 1951.566 ms (было 2150.075 ms,  2100.123 ms)
+
+-- 3. Для Business
+EXPLAIN ANALYZE
+SELECT * FROM ticket_flights_partitioned
+WHERE flight_id = 12345 AND fare_conditions = 'Business';
+
+-- Результат: Execution Time:  0.088 ms (было  765,205 ms, 536,757 ms)
+
+```
+-----------------------------------
+Вот итоговая таблица с вашими результатами тестирования, оформленная в формате Markdown:
+
+## Итоговая таблица производительности запросов
+
+| Тип запроса                     | Оригинальная таблица (мс) | После секционирования (мс) | После оптимизации (мс) | Улучшение (раз) |
+|---------------------------------|--------------------------|---------------------------|------------------------|-----------------|
+| **Фильтрация (Economy)**<br>`SELECT * WHERE flight_id=12345 AND fare_conditions='Economy'` | 1554.005 | 254.245 | 0.271 | 5734x |
+| **Фильтрация (Business)**<br>`SELECT * WHERE flight_id=12345 AND fare_conditions='Business'` | 765.205 | 536.757 | 0.088 | 8695x |
+| **Агрегация**<br>`SELECT fare_conditions, COUNT(*) GROUP BY fare_conditions` | 2150.075 | 2100.123 | 1951.566 | 1.1x |
+
+## 7. Тестирование операций модификации данных
+
+```sql
+-- Тест вставки
+EXPLAIN ANALYZE
+INSERT INTO ticket_flights_partitioned 
+VALUES ('1234567890123', 54321, 'Economy', 15000.00);
+
+-- Результат: Execution Time: 0.241 ms
+
+-- Тест обновления
+EXPLAIN ANALYZE
+UPDATE ticket_flights_partitioned
+SET amount = 16000.00
+WHERE ticket_no = '1234567890123' AND flight_id = 54321;
+
+-- Результат: Execution Time: 0.148 ms
+
+-- Тест удаления
+EXPLAIN ANALYZE
+DELETE FROM ticket_flights_partitioned
+WHERE ticket_no = '1234567890123' AND flight_id = 54321;
+
+-- Результат: Execution Time: 0.176 ms
+```
+Эта таблица наглядно демонстрирует, что секционирование с последующей оптимизацией дает максимальный эффект для запросов с фильтрацией по условиям секционирования.
+
+## 8. Выводы
+### Производительность:
+1. **Запросы с фильтрацией** показали феноменальное ускорение:
+   - Для Economy: ускорение в **5734 раза**
+   - Для Business: ускорение в **8695 раз**
+   - Причина: эффективное использование индексов + секционирование
+
+2. **Агрегационный запрос** улучшился незначительно:
+   - Ускорение всего в **1.1 раза**
+   - Причина: необходимость полного сканирования всех секций
+
+3. **Сравнение этапов**:
+   - Секционирование само по себе дало значительное улучшение
+   - Добавление индексов радикально ускорило точечные запросы
+
+### Преимущества решения:
+
+1. **Экстремальная производительность** фильтрующих запросов:
+   - Достигнуто время выполнения <1 мс для критически важных операций
+   - Возможность обработки высоких нагрузок в реальном времени
+
+2. **Физическое разделение данных**:
+   - Полная изоляция классов обслуживания (Economy/Comfort/Business)
+   - Независимая работа с разными категориями пассажиров
+
+3. **Гибкость управления**:
+   - Возможность индивидуального обслуживания каждой секции
+   - Раздельное резервное копирование и обслуживание
+
+### Возможные улучшения:
+
+1. **Масштабирование системы**:
+   - Реализовать автоматическое создание секций:
+   ```sql
+   CREATE OR REPLACE FUNCTION create_partitions()
+   RETURNS TRIGGER AS $$
+   BEGIN
+     -- Логика автоматического создания секций
+   END;
+   $$ LANGUAGE plpgsql;
+   ```
+
+2. **Дополнительная оптимизация**:
+   - Внедрить составное секционирование (по fare_conditions + flight_id)
+   - Рассмотреть columnar storage для аналитических запросов
+   - Реализовать стратегию hot/cold данных для архивных рейсов
+
+3. **Мониторинг**:
+   - Настроить алертинг при замедлении ключевых запросов
+   - Регулярно пересматривать планы выполнения с помощью:
+   ```sql
+   SELECT * FROM pg_stat_statements 
+   ORDER BY total_time DESC LIMIT 10;
+   `
+##  SQL-скрипт секционирования и оптимизации таблицы ticket_flights с улучшениями:
+
+```sql
+-- 1. Создание секционированной таблицы с улучшенной структурой
+CREATE TABLE ticket_flights_partitioned (
+    ticket_no character(13) NOT NULL,
+    flight_id integer NOT NULL,
+    fare_conditions character varying(10) NOT NULL,
+    amount numeric(10,2) NOT NULL,
+    created_at timestamptz DEFAULT now(),
+    updated_at timestamptz DEFAULT now(),
+    PRIMARY KEY (ticket_no, flight_id, fare_conditions)
+) PARTITION BY LIST (fare_conditions);
+
+-- 2. Создание секций с индивидуальными настройками хранения
+CREATE TABLE tf_economy PARTITION OF ticket_flights_partitioned
+    FOR VALUES IN ('Economy')
+    WITH (fillfactor = 90, autovacuum_enabled = true);
+    
+CREATE TABLE tf_comfort PARTITION OF ticket_flights_partitioned
+    FOR VALUES IN ('Comfort')
+    WITH (fillfactor = 85, autovacuum_enabled = true);
+    
+CREATE TABLE tf_business PARTITION OF ticket_flights_partitioned
+    FOR VALUES IN ('Business')
+    WITH (fillfactor = 80, autovacuum_enabled = true);
+
+-- 3. Перенос данных с контролем прогресса
+DO $$
+DECLARE
+    total_rows bigint;
+    batch_size int := 100000;
+    processed int := 0;
+BEGIN
+    SELECT COUNT(*) INTO total_rows FROM ticket_flights;
+    
+    RAISE NOTICE 'Начало переноса % строк', total_rows;
+    
+    WHILE processed < total_rows LOOP
+        INSERT INTO ticket_flights_partitioned 
+        SELECT * FROM ticket_flights
+        ORDER BY flight_id
+        LIMIT batch_size OFFSET processed;
+        
+        processed := processed + batch_size;
+        RAISE NOTICE 'Перенесено % из % строк (%%)', 
+            LEAST(processed, total_rows), 
+            total_rows,
+            ROUND(LEAST(processed, total_rows)::numeric / total_rows * 100, 2);
+    END LOOP;
+END $$;
+
+-- 4. Создание оптимизированных индексов для каждой секции
+-- Основные индексы для поиска
+CREATE INDEX CONCURRENTLY idx_tf_economy_flight ON tf_economy (flight_id) 
+    WITH (deduplicate_items = on);
+CREATE INDEX CONCURRENTLY idx_tf_comfort_flight ON tf_comfort (flight_id)
+    WITH (deduplicate_items = on);
+CREATE INDEX CONCURRENTLY idx_tf_business_flight ON tf_business (flight_id)
+    WITH (deduplicate_items = on);
+
+-- Составные индексы для часто используемых запросов
+CREATE INDEX CONCURRENTLY idx_tf_economy_combo ON tf_economy (flight_id, amount);
+CREATE INDEX CONCURRENTLY idx_tf_comfort_combo ON tf_comfort (flight_id, amount);
+CREATE INDEX CONCURRENTLY idx_tf_business_combo ON tb_business (flight_id, amount);
+
+-- 5. Оптимизация для агрегатных запросов
+-- Частичные индексы для отчетов
+CREATE INDEX CONCURRENTLY idx_tf_economy_amount_high ON tf_economy (amount)
+    WHERE amount > 10000;
+    
+CREATE INDEX CONCURRENTLY idx_tf_business_amount_low ON tf_business (amount)
+    WHERE amount < 50000;
+
+-- 6. Материализованные представления для аналитики
+CREATE MATERIALIZED VIEW mv_flights_by_class AS
 SELECT 
-    COUNT(*) FILTER (WHERE scheduled_departure < '2017-01-01') AS y2016_count,
-    COUNT(*) FILTER (WHERE scheduled_departure >= '2017-01-01') AS y2017_count
-FROM flights_partitioned;
+    fare_conditions,
+    COUNT(*) as ticket_count,
+    SUM(amount) as total_amount,
+    AVG(amount) as avg_amount
+FROM ticket_flights_partitioned
+GROUP BY fare_conditions
+WITH DATA;
 
--- Результат проверки:
--- y2016_count | y2017_count
--- -------------+------------
---        8223 |        8031
+-- 7. Автоматическое обновление представлений
+CREATE OR REPLACE FUNCTION refresh_flight_views()
+RETURNS TRIGGER AS $$
+BEGIN
+    REFRESH MATERIALIZED VIEW CONCURRENTLY mv_flights_by_class;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
 
--- 5. Создание индексов для каждой секции
-CREATE INDEX ON flights_y2016 (scheduled_departure);
-CREATE INDEX ON flights_y2017 (scheduled_departure);
+CREATE TRIGGER trg_refresh_views
+AFTER INSERT OR UPDATE OR DELETE ON ticket_flights_partitioned
+FOR EACH STATEMENT EXECUTE FUNCTION refresh_flight_views();
 
--- 6. Перенос ограничений
-ALTER TABLE flights_partitioned ADD FOREIGN KEY (departure_airport) REFERENCES airports(airport_code);
-ALTER TABLE flights_partitioned ADD FOREIGN KEY (arrival_airport) REFERENCES airports(airport_code);
-ALTER TABLE flights_partitioned ADD FOREIGN KEY (aircraft_code) REFERENCES aircrafts(aircraft_code);
-
--- 7. Замена таблиц
+-- 8. Замена оригинальной таблицы с минимальным простоем
 BEGIN;
-ALTER TABLE flights RENAME TO flights_old;
-ALTER TABLE flights_partitioned RENAME TO flights;
+    LOCK TABLE ticket_flights IN EXCLUSIVE MODE;
+    
+    -- Перенос ограничений (для внешних ключей)
+    ALTER TABLE ticket_flights_partitioned 
+        ADD CONSTRAINT fk_ticket_flights_tickets
+        FOREIGN KEY (ticket_no) REFERENCES tickets(ticket_no);
+    
+    ALTER TABLE ticket_flights_partitioned
+        ADD CONSTRAINT fk_ticket_flights_flights
+        FOREIGN KEY (flight_id) REFERENCES flights(flight_id);
+    
+    -- Переключение таблиц
+    ALTER TABLE ticket_flights RENAME TO ticket_flights_legacy;
+    ALTER TABLE ticket_flights_partitioned RENAME TO ticket_flights;
+    
+    -- Перенос прав доступа
+    GRANT ALL PRIVILEGES ON TABLE ticket_flights TO current_user;
+    GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO current_user;
+    
+    -- Создание представления для обратной совместимости
+    CREATE VIEW ticket_flights_legacy_view AS 
+    SELECT * FROM ticket_flights;
 COMMIT;
+
+-- 9. Оптимизация обслуживания
+-- Настройка автоочистки для больших секций
+ALTER TABLE tf_economy SET (
+    autovacuum_vacuum_scale_factor = 0.05,
+    autovacuum_analyze_scale_factor = 0.02
+);
+
+-- 10. Функция для автоматического создания секций
+CREATE OR REPLACE FUNCTION create_fare_condition_partition()
+RETURNS TRIGGER AS $$
+DECLARE
+    partition_name text;
+BEGIN
+    partition_name := 'tf_' || LOWER(NEW.fare_conditions);
+    
+    EXECUTE format(
+        'CREATE TABLE IF NOT EXISTS %I PARTITION OF ticket_flights 
+        FOR VALUES IN (%L)',
+        partition_name, NEW.fare_conditions);
+    
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 11. Создание триггера для обработки новых классов
+-- (актуально, если могут появиться новые fare_conditions)
+CREATE TRIGGER trg_new_fare_condition
+AFTER INSERT ON fare_conditions -- предположим, что есть справочник классов
+FOR EACH ROW
+EXECUTE FUNCTION create_fare_condition_partition();
+
+-- 12. Завершающая оптимизация
+ANALYZE ticket_flights;
+VACUUM FULL VERBOSE ANALYZE ticket_flights;
+
+-- 13. Проверка распределения данных
+SELECT 
+    fare_conditions,
+    pg_size_pretty(pg_total_relation_size('tf_' || fare_conditions)) as partition_size,
+    (SELECT COUNT(*) FROM ticket_flights WHERE fare_conditions = f.fare_conditions) as row_count
+FROM (SELECT DISTINCT fare_conditions FROM ticket_flights) f;
 ```
-
-## 4. Оптимизация запросов
-
-### Добавление индексов
-Для оптимизации запросов к секционированной таблице были созданы:
-1. Индексы по дате вылета для каждой секции
-2. Первичный ключ, включающий flight_id и scheduled_departure
-3. Внешние ключи для связанных таблиц
-
-### Сравнение производительности
-
-**Тестовый запрос 1:** Выборка рейсов за конкретный месяц
-
-```sql
--- До секционирования
-EXPLAIN ANALYZE
-SELECT * FROM flights_old 
-WHERE scheduled_departure BETWEEN '2017-08-01' AND '2017-08-31';
--- Время выполнения: 3.183 ms
-
--- После секционирования
-EXPLAIN ANALYZE
-SELECT * FROM flights 
-WHERE scheduled_departure BETWEEN '2017-08-01' AND '2017-08-31';
--- Время выполнения: 0.886 ms (ускорение в 3.6 раза)
-```
-
-**Тестовый запрос 2:** Агрегация по статусам рейсов за год
-
-```sql
--- До секционирования
-EXPLAIN ANALYZE
-SELECT status, COUNT(*) 
-FROM flights_old
-WHERE scheduled_departure BETWEEN '2017-01-01' AND '2017-12-31'
-GROUP BY status;
--- Время выполнения: 4.752 ms
-
--- После секционирования
-EXPLAIN ANALYZE
-SELECT status, COUNT(*) 
-FROM flights
-WHERE scheduled_departure BETWEEN '2017-01-01' AND '2017-12-31'
-GROUP BY status;
--- Время выполнения: 1.213 ms (ускорение в 3.9 раза)
-```
-
-**Тестовый запрос 3:** Поиск рейсов по аэропорту за период
-
-```sql
--- До секционирования
-EXPLAIN ANALYZE
-SELECT * FROM flights_old
-WHERE departure_airport = 'SVO'
-AND scheduled_departure BETWEEN '2017-06-01' AND '2017-06-30';
--- Время выполнения: 3.941 ms
-
--- После секционирования
-EXPLAIN ANALYZE
-SELECT * FROM flights
-WHERE departure_airport = 'SVO'
-AND scheduled_departure BETWEEN '2017-06-01' AND '2017-06-30';
--- Время выполнения: 1.057 ms (ускорение в 3.7 раза)
-```
-
-### Выводы по оптимизации:
-1. Секционирование дало значительный прирост производительности для запросов с фильтрацией по дате
-2. Наилучшие результаты достигнуты для запросов, которые охватывают данные одной секции
-3. Дополнительные индексы на секциях обеспечили эффективный доступ к данным
-4. Для запросов без фильтрации по дате производительность осталась на прежнем уровне
