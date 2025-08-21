@@ -794,3 +794,13 @@ ansible-playbook -i inventory/production site.yml --ask-pass
    - Физическая репликация на VM4
 
 Для работы этого плейбука потребуется установленный на управляющей машине Ansible и Python-модуль `community.postgresql` .
+
+Чтобы не ждать, запустим скрипт:
+```bash
+sudo /opt/backup/borg-backup.sh
+```
+Проверяем список бэкапов:
+```bash
+borg list borg@192.168.11.160:/var/backup
+```
+![alt text](image.png)
