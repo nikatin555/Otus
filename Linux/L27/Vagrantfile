@@ -1,0 +1,30 @@
+ENV['VAGRANT_SERVER_URL'] = 'https://vagrant.elab.pro'
+
+Vagrant.configure("2") do |config|
+  config.vm.define "backup" do |backup|
+    backup.vm.box = "ubuntu/jammy64"
+    backup.vm.hostname = "backup"
+    backup.vm.network "private_network", ip: "192.168.11.160"
+
+    backup.vm.provider "virtualbox" do |vb|
+      vb.memory = "1024"
+      vb.name = "backup-server"
+    end
+
+    backup.vm.disk :disk, size: "2GB", name: "backup_disk", primary: false
+    backup.vm.provision "shell", path: "provision/backup_setup.sh"
+  end
+
+  config.vm.define "client" do |client|
+    client.vm.box = "ubuntu/jammy64"
+    client.vm.hostname = "client"
+    client.vm.network "private_network", ip: "192.168.11.150"
+
+    client.vm.provider "virtualbox" do |vb|
+      vb.memory = "1024"
+      vb.name = "client-server"
+    end
+
+    client.vm.provision "shell", path: "provision/client_setup.sh"
+  end
+end
