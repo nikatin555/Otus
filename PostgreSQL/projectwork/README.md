@@ -1858,29 +1858,36 @@ sudo ETCDCTL_API=3 etcdctl --endpoints=https://192.168.10.209:2379 \
   --key=/etc/etcd/etcd.key \
   get "/service/patroni-cluster-1s-zup/" --prefix
 ```
-![alt text](image-16.png)
+![alt text](image-61.png)
 ![alt text](image-17.png)
 ![alt text](image-18.png)
+
 
 ##### Текущее состояние кластера:
 
 ##### ✅ **spbpsql1 (MASTER):**
 - Состояние: `running`
 - Роль: `leader` 
-- Timeline: 2
+- Timeline: 10
 - PostgreSQL успешно работает
 
 ##### ✅ **spbpsql2 (REPLICA):**
 - Состояние: `running`
 - Роль: `replica`
-- Timeline: 2
-- Репликация работает: `receive_lag: 0`, `replay_lag: 0`
+- Timeline: 10
+- Репликация работает: `receive_lag: 0` (Нет задержки получения WAL), `replay_lag: 0` (Нет задержки применения WAL)
 - PostgreSQL успешно запущен и реплицирует данные
 
 ##### ✅ **Репликация:**
 - WAL streaming работает
-- Lag равен 0 - отличная синхронизация
+- Lag равен 0 - отличная синхронизация (ОБЩАЯ задержка = 0)
 - Оба узла на одном timeline
+```bash
+"receive_lsn": "0/A9CA9240",    # Полученная позиция WAL
+"replay_lsn": "0/A9CA9240",     # Примененная позиция WAL
+"lsn": "0/A9CA9240"             # Текущая позиция
+```
+Это означает: Реплика spbpsql2 полностью синхронизирована с лидером spbpsql1.
 
 ##### Проверка репликации
 
