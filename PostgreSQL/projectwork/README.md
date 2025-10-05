@@ -1793,9 +1793,9 @@ etcd3:
 3) на 2й ноде spbpsql была проблема с правами на каталог  `/var/lib/pgsql/17/data/`, система требовала 0700 или 0750, иначе, PAtroni не стартовал (проблема была на версии PostgreSQL 17 Standard):
 ```bash
 sudo systemctl stop patroni
-sudo rm -rf /var/lib/pgsql/17/data/*
-sudo chmod -R 0750 /var/lib/pgsql/17/data/
-sudo chown admindb:admindb/var/lib/pgsql/17/data/
+sudo rm -rf /var/lib/pgpro/1c-17/data/*
+sudo chmod -R 0750 /var/lib/pgpro/1c-17/data/
+sudo chown admindb:admindb /var/lib/pgpro/1c-17/data/
 sudo systemctl start patroni
 ```
 
@@ -2360,6 +2360,14 @@ rpm -qa | grep -E '(odbc|postgre)'
 ![alt text](image-68.png) <br>
 ![alt text](image-63.png) 
 ![alt text](image-64.png)
+
+**Проблема:**информационную базу для сервера spbpsql2 не настроить, пока он в роли `реплики`. П.э. я сначала переключил его в лидера, а затем настроил подключение в 1С:
+```bash
+curl -s -X POST http://192.168.10.207:8008/switchover -d '{"leader": "spbpsql1", "candidate": "spbpsql2"}'
+
+curl http://192.168.10.204:8008/cluster | jq .
+```
+![alt text](image-35.png)
 
 
 #### Этап 2: Загрузка базы в кластер PostgreSQL
