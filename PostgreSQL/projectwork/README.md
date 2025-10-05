@@ -2064,16 +2064,15 @@ chmod +x /tmp/check_patroni.sh
 ```bash
 # На текущем мастере создаю админа и базу для 1С
 #или: создадим паользователя
-/opt/pgpro/1c-17/bin/psql -h 192.168.10.204 -U admindbps -d postgres -c "
-CREATE USER zupadmines WITH PASSWORD 'Jlbycfy37!';"
+/opt/pgpro/1c-17/bin/psql -h 192.168.10.204 -U admindb -d postgres -c "
+CREATE USER zupadmines WITH PASSWORD 'MyPass!';"
 # Создать базу с правильной локалью
-/opt/pgpro/1c-17/bin/psql -h 192.168.10.204 -U admindbps -d postgres -c "CREATE DATABASE \"hr_test_psql2\" OWNER zupadmines ENCODING 'UTF8' LC_COLLATE 'ru_RU.UTF-8' LC_CTYPE 'ru_RU.UTF-8' TEMPLATE template0;"
+/opt/pgpro/1c-17/bin/psql -h 192.168.10.204 -U admindb -d postgres -c "CREATE DATABASE \"hr_test_psql2\" OWNER zupadmines ENCODING 'UTF8' LC_COLLATE 'ru_RU.UTF-8' LC_CTYPE 'ru_RU.UTF-8' TEMPLATE template0;"
 # Настроить привилегии
-/opt/pgpro/1c-17/bin/psql -h 192.168.10.204 -U admindbps -d postgres -c "GRANT ALL PRIVILEGES ON DATABASE \"hr_test_psql\" TO zupadmines;"
+/opt/pgpro/1c-17/bin/psql -h 192.168.10.204 -U admindb -d postgres -c "GRANT ALL PRIVILEGES ON DATABASE \"hr_test_psql\" TO zupadmines;"
 
 # или
-/opt/pgpro/1c-17/bin/psql -h 192.168.10.204 -U admindbps -d postgres -c "
-CREATE USER zupadmines WITH PASSWORD 'Jlbycfy37!';
+/opt/pgpro/1c-17/bin/psql -h 192.168.10.204 -U admindb -d postgres -c "
 CREATE DATABASE  \"hr_test_psql\" OWNER zupadmines ENCODING 'UTF8' LC_COLLATE 'ru_RU.UTF-8' LC_CTYPE 'ru_RU.UTF-8' TEMPLATE template0;
 GRANT ALL PRIVILEGES ON DATABASE  \"hr_test_psql\" TO zupadmines;
 "
@@ -2087,12 +2086,12 @@ psql -h 192.168.10.207 -U admindbps -d postgres -c "\l "hr_test_psql""
 #### **Проблемы**: 
 1) при создании базы данных, столкнулся с проблемой:
 ```bash
-postgres=# create database 1C_hr_test_psql owner zupadmines;
+postgres=# create database 1C_hr_test_psql owner zupadm;
 ERROR:  trailing junk after numeric literal at or near "1C_hr_test_psql"
-LINE 1: create database 1C_hr_test_psql owner zupadmines;
+LINE 1: create database 1C_hr_test_psql owner zupadm;
                     ^
 ```
-Ошибка возникает из-за того, что имя базы данных `1C_hr_test_psql` начинается с цифры. В PostgreSQL такие имена считаются невалидными идентификаторами и требуют специального оформления: `CREATE DATABASE "1C_hr_test_psql" OWNER zupadmines;`
+Ошибка возникает из-за того, что имя базы данных `1C_hr_test_psql` начинается с цифры. В PostgreSQL такие имена считаются невалидными идентификаторами и требуют специального оформления: `CREATE DATABASE "1C_hr_test_psql" OWNER zupadm;`
 На практике, я решил убрать убрать цифру из названия базы.
 
 2) также была ошибка, после того как я создал базу и попробовал её настроить как "Информационную базу" на сервере 1С:
@@ -2358,10 +2357,9 @@ rpm -qa | grep -E '(odbc|postgre)'
     *    Открываю текущую информационную базу с базой 1с ЗУП на MS SQL Server 2007  в режиме "Конфигуратор".
     *   Меню -> **Администрирование** -> **Выгрузить информационную базу...**
     *   Сохраняю файл `ZUP_To_Postgres.dt`.
-
-![alt text](image-41.png) <br>
-![alt text](image-49.png) 
-![alt text](image-51.png)
+![alt text](image-68.png) <br>
+![alt text](image-63.png) 
+![alt text](image-64.png)
 
 
 #### Этап 2: Загрузка базы в кластер PostgreSQL
@@ -2379,9 +2377,11 @@ rpm -qa | grep -E '(odbc|postgre)'
     1.  На `spbpsql1`  выполните `systemctl stop patroni` 
     2.  Patroni автоматически переключает мастер на второй узел. 
 
-![alt text](image-43.png)
+![alt text](image-65.png)
+![alt text](image-66.png)
 
-![alt text](image-44.png)
+после переключения кластера:
+![alt text](image-67.png)
 
 В 1С придётся перезайти в информационную базу  `hr_test_psql2`. Для тестовой среды это не проблемы и в большинстве случаев контролируемый процесс. Для продакшен необходим HAProxy и PgBouncer.
 
