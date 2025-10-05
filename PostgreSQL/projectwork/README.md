@@ -2111,6 +2111,12 @@ LC_COLLATE 'ru_RU.UTF-8'
 LC_CTYPE 'ru_RU.UTF-8'
 TEMPLATE template0;"
 ```
+```bash
+#посмотрим local наших баз
+/opt/pgpro/1c-17/bin/psql -h 192.168.10.204 -U admindbps -d postgres -c "\l"
+```
+![alt text](image-69.png)
+
 3) При попытке добавить в "информационную базу" базу psql, всплывала ошибка:
 
 ![alt text](image-29.png)
@@ -2361,7 +2367,8 @@ rpm -qa | grep -E '(odbc|postgre)'
 ![alt text](image-63.png) 
 ![alt text](image-64.png)
 
-**Проблема:**информационную базу для сервера spbpsql2 не настроить, пока он в роли `реплики`. П.э. я сначала переключил его в лидера, а затем настроил подключение в 1С:
+**Проблема:** информационную базу для сервера spbpsql2 не настроить, пока он в роли `реплики`. П.э. я сначала переключил его в лидера, а затем настроил подключение в 1С:
+
 ```bash
 curl -s -X POST http://192.168.10.207:8008/switchover -d '{"leader": "spbpsql1", "candidate": "spbpsql2"}'
 
