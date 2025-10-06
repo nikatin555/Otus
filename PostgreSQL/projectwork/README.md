@@ -1777,20 +1777,27 @@ sudo systemctl start patroni
 
 ##### **Проблемы:**
 Была проблема:
-1) нужна была весия etcd3, не подключался кластер к кластеру DCS:
+1) Patroni не подключался к кластеру DCS, нужна была весия etcd3 (+ проблема совместимости версий patroni с etcd3):
 ```bash
 sudo pip3 uninstall -y python-etcd etcd3
 sudo pip3 install etcd3
 sudo pip3 uninstall -y patroni
 sudo pip3 install patroni[etcd3]
 sudo systemctl daemon-reload
+sudo pip3 list | grep -E "(patroni|etcd|psycopg2)"
+```
+![alt text](image-71.png)
+
+Также, версию patroni можно посмотреть через полный путь:
+```bash
+/usr/local/bin/patroni --version
 ```
 
 2) кластер Patroni не подключался к кластеру etcd, т.к. Patroni пытался использовать API V2, а etcd работает с V3, необходимо в ` /etc/patroni.yml` добавить 1у строчку (чтобы принудительно использовать V3):
 etcd3:
    api_version: v3
 
-3) на 2й ноде spbpsql была проблема с правами на каталог  `/var/lib/pgsql/17/data/`, система требовала 0700 или 0750, иначе, PAtroni не стартовал (проблема была на версии PostgreSQL 17 Standard):
+3) на 2й ноде spbpsql была проблема с правами на каталог  `/var/lib/pgpro/1c-17/data/`, система требовала 0700 или 0750, иначе, PAtroni не стартовал (проблема была на версии PostgreSQL 17 Standard):
 ```bash
 sudo systemctl stop patroni
 sudo rm -rf /var/lib/pgpro/1c-17/data/*
@@ -1822,7 +1829,7 @@ sudo systemctl start patroni
 parameters:
     unix_socket_directories: '/run/postgresql'
 
-# Удаляем старые lock файлы если они есть
+# Удаляем старые lock файлы
 sudo rm -f /run/postgresql/.s.PGSQL.5432.*
 sudo rm -f /tmp/.s.PGSQL.5432.*
 
