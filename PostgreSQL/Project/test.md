@@ -313,9 +313,11 @@ Patroni использует порт 8008 по умолчанию, которы
 ```bash
 # Разрешить порт для Patroni API
 sudo semanage port -a -t http_port_t -p tcp 8008
+sudo semanage port -a -t postgresql_port_t -p tcp 5432
 
 # Проверить разрешенные порты
 sudo semanage port -l | grep http_port_t
+sudo semanage port -l | grep postgresql_port_t
 ```
 
 ##### Шаг 6: Политика для сетевых соединений
@@ -350,22 +352,46 @@ dnf install -y policycoreutils-python-utils setroubleshoot-server
 # Временный переход в permissive режим
 setenforce Permissive
 
-# Настройка контекстов для кастомных путей
-mkdir -p /data/patroni
-mkdir -p /var/log/patroni
+# Установите контекст для каталога данных PostgreSQL
+sudo semanage fcontext -a -t postgresql_db_t "/var/lib/pgpro/1c-17/data(/.*)?"
+sudo restorecon -R -v /var/lib/pgpro/1c-17/data/
 
-semanage fcontext -a -t postgresql_db_t "/data/patroni(/.*)?"
-semanage fcontext -a -t postgresql_log_t "/var/log/patroni(/.*)?"
-restorecon -R -v /data/patroni
-restorecon -R -v /var/log/patroni
+# Для родительского каталога
+sudo semanage fcontext -a -t postgresql_db_t "/var/lib/pgpro/1c-17(/.*)?"
+sudo restorecon -R -v /var/lib/pgpro/1c-17/
+
+# Для бинарников PostgreSQL
+sudo semanage fcontext -a -t postgresql_exec_t "/opt/pgpro/1c-17/bin/postgres"
+sudo semanage fcontext -a -t postgresql_exec_t "/opt/pgpro/1c-17/bin/initdb"
+sudo semanage fcontext -a -t postgresql_exec_t "/opt/pgpro/1c-17/bin/pg_ctl"
+
+# Примените контексты
+sudo restorecon -R -v /opt/pgpro/1c-17/bin/
+
+# Для каталога логов
+sudo semanage fcontext -a -t postgresql_log_t "/var/log/postgresql(/.*)?"
+sudo restorecon -R -v /var/log/postgresql/
+
+# Или если логи в другом месте
+sudo semanage fcontext -a -t postgresql_log_t "/var/lib/pgpro/1c-17/data/pg_log(/.*)?"
+sudo restorecon -R -v /var/lib/pgpro/1c-17/data/pg_log/
 
 # Разрешение портов
-semanage port -a -t http_port_t -p tcp 8008
+sudo semanage port -a -t http_port_t -p tcp 8008
+sudo semanage port -a -t postgresql_port_t -p tcp 5432
 
 # Настройка boolean параметров
 setsebool -P postgresql_can_network_stream 1
 setsebool -P postgresql_can_network_connect 1
 setsebool -P postgresql_can_network_connect_db 1
+
+# Разрешите PostgreSQL работать в нестандартных каталогах
+sudo setsebool -P postgresql_connect_any on
+sudo setsebool -P postgresql_can_rsync on
+sudo setsebool -P daemons_enable_cluster_mode on
+
+# Для сетевых подключений
+sudo setsebool -P postgresql_use_tcp_stream on
 
 # Включение enforcing режима
 setenforce Enforcing
@@ -402,7 +428,7 @@ ps auxZ | grep postgres
 ps auxZ | grep patroni
 ```
 
-##### Шаг 10: Интеграция с системой логирования
+##### Шаг 9: Интеграция с системой логирования
 
 Настройте централизованный сбор логов SELinux:
 
@@ -479,6 +505,7 @@ echo "Проверяем установку:"
 cd ..
 rm -rf etcd-v${ETCD_VERSION}-linux-amd64 etcd-v${ETCD_VERSION}-linux-amd64.tar.gz
 ```
+![alt text](image-47.png)
 
 ### 2.2. Конфигурационные файлы для каждой ноды etcd
 
@@ -763,7 +790,7 @@ sudo ETCDCTL_API=3 etcdctl --endpoints=https://192.168.10.209:2379 \
 ![alt text](image-14.png)
 
 
-## 3. Установка PostgreSQLPro 17 и Patroni
+## 3. Установка PostgreSQL 17 и Patroni
 
 ### 3.1. На узлах PostgreSQL (spbpsql1, spbpsql2)
 
@@ -808,7 +835,9 @@ sudo scp psqladmines@spbetcd1:/etc/etcd/ca.crt /var/lib/pgsql/
 sudo chown psqladmines:psqladmines /var/lib/pgsql/*.crt /var/lib/pgsql/*.key
 sudo chmod 600 /var/lib/pgsql/etcd.key
 sudo chmod 644 /var/lib/pgsql/*.crt
+```
 
+==========================================================================
 #для тестовой зоны можем указать!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! 
 sudo chmod 744 /var/lib/pgsql/ca.crt
 sudo chmod 744 /var/lib/pgsql/etcd.crt
@@ -816,7 +845,7 @@ sudo chmod 744 /var/lib/pgsql/etcd.key
 sudo chown psqladmines:psqladmines /var/lib/pgsql/ca.crt
 sudo chown psqladmines:psqladmines /var/lib/pgsql/etcd.crt
 sudo chown psqladmines:psqladmines /var/lib/pgsql/etcd.key
-```
+==========================================================================
 
 ### 3.3. Настройка Patroni
 
@@ -973,6 +1002,224 @@ EOF
 
 sudo chown psqladmines:psqladmines /etc/patroni.yml
 ```
+
+**Подробно опишу назначение каждой настройки в моём конфигурационном файле Patroni:**
+
+#### **1. Базовые настройки кластера**
+
+```yaml
+scope: patroni-cluster-1s-zup
+namespace: /service/
+name: spbpsql1
+```
+
+- **`scope`** - Имя кластера Patroni. Все ноды в одном кластере должны иметь одинаковый scope
+- **`namespace`** - Префикс в etcd для хранения конфигурации кластера (`/service/` = ключи будут `/service/patroni-cluster-1s-zup/...`)
+- **`name`** - Уникальное имя текущей ноды в кластере
+
+#### **2. REST API настройки**
+REST API - это внутренний HTTP-сервер Patroni для:
+
+- Общения между нодами кластера
+
+- Управления кластером (переключение, перезагрузка)
+
+- Мониторинга состояния
+
+- Получения информации о кластере
+
+```yaml
+restapi:
+  listen: 192.168.10.204:8008
+  connect_address: 192.168.10.204:8008
+```
+
+- **`listen`** - IP и порт для прослушивания REST API запросов
+- **`connect_address`** - Адрес, по которому другие ноды могут подключиться к REST API этой ноды
+
+#### **3. Настройки etcd3**
+
+```yaml
+etcd3:
+  hosts: 192.168.10.209:2379,192.168.10.211:2379,192.168.10.181:2379
+  protocol: https
+  cacert: /var/lib/pgsql/ca.crt
+  cert: /var/lib/pgsql/etcd.crt
+  key: /var/lib/pgsql/etcd.key
+  api_version: v3
+```
+
+- **`hosts`** - Список etcd нод для распределенного хранения состояния
+- **`protocol: https`** - Использование SSL для безопасного соединения
+- **`cacert/cert/key`** - SSL сертификаты для аутентификации
+- **`api_version: v3`** - Версия API etcd
+
+Именно `etcd3` с `v3` корректно заработал с Patroni и кластером etcd.
+etcd - пытался подключиться с версией api `v2` или `v3beta` (если в конфигурации жестко уеазать api_version: v3).
+
+#### **4. Настройки бутстрапа и DCS**
+
+```yaml
+bootstrap:
+  dcs:
+    ttl: 30
+    loop_wait: 10
+    retry_timeout: 10
+    maximum_lag_on_failover: 1048576
+```
+
+- **`ttl: 30`** - Время жизни лидерской сессии (секунды)
+Time To Live (TTL) -это "аренда" лидерства:
+- Лидер (master) каждые 10 сек (loop_wait) обновляет свою сессию в etcd
+- Если лидер не обновил сессию за 30 сек - считается мертвым
+- Начинается выбор нового лидера.
+
+- **`loop_wait: 10`** - Интервал проверки состояния (секунды)
+- **`retry_timeout: 10`** - Таймаут повторных попыток (секунды)
+- **`maximum_lag_on_failover: 1048576`** - Максимальное отставание реплики для фейловера (в байтах) = `1МБ` ( можно увеличить до 32 МБ - для 1С этого достаточно).
+
+#### **5. Настройки PostgreSQL**
+
+#### **Основные настройки памяти**
+```yaml
+max_connections: 200          # Увеличено для множественных соединений 1С (для перспиктывы диагностики других баз, для тестовой группы 60 пользователей 1С + запас)
+shared_buffers: 4GB           # Кэш в общей памяти (25% от 16ГБ = 4ГБ (оптимально))
+huge_pages: try               # Попытка использовать huge pages огромные страницы памяти (уменьшает overhead)
+temp_buffers: 64MB            # Буферы для временных таблиц  4MB × 200 соединений ≈ 800MB (но лимит 64MB на соединение)
+work_mem: 64MB                # Память для операций сортировки/хеширования (16ГБ - 4ГБ) / 200 соединений × 0.5 ≈ 32MB) - увеличил до 64MB для текущего тестирования
+maintenance_work_mem: 2GB     # Память для операций обслуживания (VACUUM, CREATE INDEX). 6% от 16ГБ ≈ 1ГБ (увеличил для текущего тестирования)
+```
+
+#### **WAL (Write-Ahead Log) настройки**
+```yaml
+wal_level: logical            # Поддержка логической репликации
+synchronous_commit: 'on'      # Синхронная запись WAL
+wal_compression: 'on'         # Сжатие WAL
+max_wal_size: 8GB            # Максимальный размер WAL сегментов (max_wal_size = shared_buffers × 2 = 4GB × 2 = 8GB.  Для 1С 8ГБ - нормально)
+```
+
+#### **Настройки репликации**
+```yaml
+max_wal_senders: 10          # Максимальное число процессов отправки WAL
+max_replication_slots: 10    # Максимальное число слотов репликации
+hot_standby: 'on'            # Разрешить чтение на репликах
+hot_standby_feedback: 'on'   # Реплика сообщает о конфликтующих запросах
+```
+
+#### **Производительность для 1С**
+```yaml
+random_page_cost: 1.1         # Стоимость случайного доступа (SSD)
+effective_io_concurrency: 200 # Параллельные IO операции (Параллельные IO операции - количество одновременных запросов к диску: Для SSD: 200-300, для HDD: 2-8. Указывает планировщику, что диск может обрабатывать много параллельных операций)
+default_transaction_isolation: 'read committed'  # Уровень изоляции по умолчанию
+```
+
+#### **Таймауты для 1С**
+```yaml
+lock_timeout: '10s'           # Таймаут ожидания блокировки
+statement_timeout: '3600s'    # Таймаут выполнения запроса (1 час)
+idle_in_transaction_session_timeout: '1800s'  # Таймаут простоя транзакции
+```
+
+#### **Автовакуум для 1С**
+```yaml
+autovacuum_vacuum_scale_factor: 0.1  # Запуск VACUUM при 10% изменений
+autovacuum_max_workers: 5     # Количество процессов автовакуума
+autovacuum_vacuum_cost_limit: 2000  # Лимит стоимости для автовакуума (Для 1С с частыми изменениями - значение 2000 оптимально)
+```
+
+#### **Логирование и мониторинг**
+```yaml
+log_min_duration_statement: 5000  # Логировать медленные запросы (>5 сек)
+log_lock_waits: 'on'          # Логировать ожидания блокировок
+track_io_timing: 'on'         # Отслеживать время IO операций
+shared_preload_libraries: 'pg_stat_statements'  # Сбор статистики запросов
+```
+
+#### **6. Инициализация БД**
+
+```yaml
+initdb:
+  - encoding: UTF8
+  - data-checksums
+  - locale: ru_RU.UTF-8
+```
+
+- **`encoding: UTF8`** - Кодировка базы данных
+- **`data-checksums`** - Контрольные суммы для обнаружения повреждений данных
+- **`locale: ru_RU.UTF-8`** - Локаль для сортировки и сравнения строк
+
+#### **7. Настройки аутентификации (pg_hba)**
+
+```yaml
+pg_hba:
+  - host replication replicator 192.168.10.0/24 md5
+  - host all all 192.168.10.0/24 md5
+```
+
+- Разрешение репликации и подключений из (внутренней) подсети 192.168.10.0/24
+- md5 вместо scram-sha-256 (более защищенный протокол) - для лучшей производительности
+-  Широкий доступ "all all" - только для тестовых сред.
+- для продуктива нужно переделать, например:
+```bash
+pg_hba:
+  # Репликация только для специального пользователя
+  - host replication replicator 192.168.10.209,192.168.10.211,192.168.10.181 scram-sha-256
+  - host replication replicator 192.168.10.204 scram-sha-256
+  
+  # Подключения к БД только для приложения 1С
+  - host all 1c_user 192.168.10.0/24 scram-sha-256
+  - host all zap_user 192.168.10.0/24 scram-sha-256
+  
+  # Административный доступ только с конкретных IP
+  - host all admindbps 192.168.10.100 scram-sha-256
+  ```
+
+#### **8. Настройки PostgreSQL процесса**
+
+```yaml
+postgresql:
+  listen: 192.168.10.204:5432
+  data_dir: /var/lib/pgpro/1c-17/data
+  bin_dir: /opt/pgpro/1c-17/bin
+```
+
+- **`data_dir`** - Каталог с данными PostgreSQLPro
+- **`bin_dir`** - Каталог с исполняемыми файлами PostgreSQLPro
+
+#### **9. Аутентификация**
+
+```yaml
+authentication:
+  replication:
+    username: replicator
+    password: 'Keyjkbrbq99!'
+  superuser:
+    username: admindbps
+    password: 'Keyjkbrbq64!'
+```
+
+- Учетные данные для репликации и суперпользователя
+
+#### **10. Теги ноды**
+
+```yaml
+tags:
+  nofailover: false    # Разрешить фейловер
+  noloadbalance: false # Разрешить балансировку нагрузки
+  clonefrom: false     # Запретить клонирование с этой ноды
+  nosync: false        # Синхронная репликация
+```
+
+###### **Особенности оптимизации для 1С:**
+
+1. **Увеличенные таймауты** - для длительных операций 1С
+2. **Больше памяти для операций** - work_mem, maintenance_work_mem
+3. **Оптимизированный автовакуум** - для частых изменений данных в 1С
+4. **Логирование медленных запросов** - для выявления проблемных мест
+5. **Поддержка русского языка** - корректная сортировка и поиск
+
+Эти настройки обеспечивают стабильную работу PostgreSQL в кластере Patroni с оптимизацией под типичные нагрузки систем 1С.
+
 
 **На spbpsql2 (192.168.10.207):**
 ```bash
@@ -1744,68 +1991,125 @@ rpm -qa | grep -E '(odbc|postgre)'
 - **pgAudit**: для аудита.
 - **WAL-G/barman**: для бэкапов.
 
+=======================================
 
-================================
-SELinux
+Отличная работа! На основе вашего подробного описания подготовлю структурированное и сбалансированное оглавление для проектной работы.
 
-```bash
-#!/bin/bash
+---
+## Оглавление
 
-# Установка утилит
-sudo dnf install policycoreutils-python-utils setroubleshoot-server -y
+### **Оглавление проектной работы: "Развертывание отказоустойчивого кластера PostgreSQL 17 на базе Patroni для платформы 1С:Предприятие и миграция данных с Microsoft SQL Server 2007/2019"**
 
-# Каталог данных
-sudo semanage fcontext -a -t postgresql_db_t "/var/lib/pgpro/1c-17(/.*)?"
-sudo restorecon -R -v /var/lib/pgpro/1c-17/
+**Введение**
+*   Актуальность проекта
+*   Цели и задачи работы
+*   Объект и предмет исследования
+*   Ожидаемые результаты
 
-# Бинарники
-sudo semanage fcontext -a -t postgresql_exec_t "/opt/pgpro/1c-17/bin/postgres"
-sudo semanage fcontext -a -t postgresql_exec_t "/opt/pgpro/1c-17/bin/initdb"
-sudo semanage fcontext -a -t postgresql_exec_t "/opt/pgpro/1c-17/bin/pg_ctl"
-sudo semanage fcontext -a -t bin_t "/opt/pgpro/1c-17/bin(/.*)?"
-sudo restorecon -R -v /opt/pgpro/1c-17/bin/
+---
 
-# Логи
-sudo semanage fcontext -a -t postgresql_log_t "/var/log/postgresql(/.*)?"
-sudo restorecon -R -v /var/log/postgresql/
+### **Глава 1. Аналитическая часть**
 
-# Порты
-sudo semanage port -a -t http_port_t -p tcp 8008
-sudo semanage port -a -t postgresql_port_t -p tcp 5432
+**1.1. Введение: Актуальность переноса 1С с проприетарных СУБД на открытые решения**
+*   Тенденции перехода на открытое ПО в корпоративном секторе
+*   Анализ проблем эксплуатации устаревших систем (на примере MS SQL Server 2007)
+*   Факторы, обуславливающие стратегическую целесообразность миграции
 
-# Boolean
-sudo setsebool -P postgresql_connect_any on
-sudo setsebool -P postgresql_can_rsync on
-sudo setsebool -P daemons_enable_cluster_mode on
-sudo setsebool -P postgresql_use_tcp_stream on
+**1.2. Обзор технологий: Сравнение PostgreSQL 17 и MS SQL Server**
+*   Сравнительный анализ по ключевым критериям (лицензирование, производительность, надежность, безопасность, масштабируемость)
+*   Выводы об оптимальности выбора PostgreSQL 17 для платформы 1С:Предприятие
 
-echo "SELinux context configuration completed!"
-```
-# Проверьте все контексты
-ls -laZ /var/lib/pgpro/1c-17/
-ls -laZ /opt/pgpro/1c-17/bin/postgres
-ls -laZ /var/log/postgresql/
+**1.3. Обзор решений для кластеризации: Выбор Patroni + etcd**
+*   Анализ решений обеспечения высокой доступности (High Availability) для PostgreSQL
+*   Сравнительный анализ инструментов: встроенная репликация, Pgpool-II, собственные решения
+*   Обоснование выбора связки Patroni и распределенного хранилища etcd
 
-# Проверьте порты
-sudo semanage port -l | grep -E '(8008|5432)'
+**1.4. Анализ требований**
+*   Аппаратные требования к серверам БД и etcd
+*   Требования к программному обеспечению (ОС, СУБД, оркестрация)
+*   Требования к безопасности (изоляция, доступ, шифрование, резервное копирование)
+*   Требования к отказоустойчивости и доступности (RTO, RPO, архитектура)
 
- Если возникают проблемы
-# Временно отключите SELinux для диагностики
-sudo setenforce 0
+**Заключение по аналитической части**
 
-# Или добавьте в permissive mode
-sudo semanage permissive -a postgresql_t
+---
 
-# Просмотр логов SELinux
-sudo ausearch -m avc -ts today
-sudo sealert -a /var/log/audit/audit.log
+### **Глава 2. Проектная часть**
 
+**2.1. Проект инфраструктуры**
+*   Архитектура кластера Patroni + etcd для PostgreSQLPro 17
+*   Схема сети и план размещения компонентов
+*   Обоснование принятых архитектурных решений и компромиссов (2 узла PostgreSQL, 3 узла etcd, отсутствие балансировщика)
 
+**2.2. Выбор и обоснование средств защиты**
+*   Проект настройки `firewalld`
+*   Базовые меры hardening для AlmaLinux 10 (политики паролей, настройка SSH)
+*   План настройки SELinux для работы Patroni и PostgreSQL в режиме enforcing
 
+**2.3. Проект конфигурации PostgreSQL и Patroni**
+*   Параметры PostgreSQL, оптимизированные для нагрузки 1С (`shared_buffers`, `work_mem`, `autovacuum`, таймауты)
+*   Структура и назначение конфигурационного файла `patroni.yml`
+*   Настройки репликации, инициализации и аутентификации в кластере
 
- Проверьте что SELinux включен в enforcing mode
-sudo grep SELINUX= /etc/selinux/config
+**2.4. План миграции данных**
+*   Выбор метода миграции (выгрузка/загрузка в формате `.dt`) и его обоснование
+*   Этапы переноса данных: подготовка, выгрузка, загрузка, тестирование
+*   План тестирования целостности данных и функциональности после миграции
 
-# Перезагрузите для применения всех изменений
-sudo reboot
-проверяйте логи SELinux с помощью sealer
+---
+
+### **Глава 3. Практическая реализация**
+
+**3.1. Подготовка инфраструктуры и базовые настройки**
+*   Установка и базовая настройка AlmaLinux 10 на всех виртуальных машинах
+*   Настройка сетевого взаимодействия и синхронизации времени
+*   Базовая настройка безопасности и `firewalld`
+
+**3.2. Развертывание и настройка кластера etcd**
+*   Установка и настройка etcd на узлах `spbetcd1`, `spbetcd2`, `spbetcd3`
+*   Генерация и распределение SSL-сертификатов
+*   Запуск кластера etcd и проверка его работоспособности
+
+**3.3. Развертывание кластера PostgreSQL под управлением Patroni**
+*   Установка PostgreSQLPro 17 Standard и Patroni на узлах `spbpsql1`, `spbpsql2`
+*   Настройка конфигурационных файлов `patroni.yml` для мастера и реплики
+*   Инициализация кластера и запуск Patroni
+*   Диагностика и решение проблем, возникших при развертывании
+
+**3.4. Миграция базы данных 1С:ЗУП**
+*   Подготовка исходной базы на MS SQL Server 2007
+*   Установка и настройка ODBC-драйверов для подключения 1С к PostgreSQL
+*   Пошаговый процесс выгрузки данных в `.dt` файл и загрузки в новый кластер
+*   Решение проблем, связанных с локализацией и созданием базы данных
+
+**3.5. Тестирование работоспособности кластера**
+*   Проверка репликации и целостности данных
+*   **Тест отказоустойчивости:** Ручное переключение лидера (`patronictl switchover`), симуляция сбоя ноды
+*   Проверка подключения и базовой функциональности 1С после миграции
+
+---
+
+### **Заключение**
+
+*   Итоги работы: Достигнутые цели проекта
+*   Выводы: Анализ сложностей, с которыми столкнулись, и методов их решения
+*   Оценка экономического эффекта от перехода на открытое ПО
+*   Перспективы развития системы: Настройка HAProxy и PgBouncer, внедрение мониторинга (Prometheus/Grafana), организация отказоустойчивого бэкапа (pgBackRest/WAL-G)
+
+---
+
+### **Список использованных источников**
+
+### **Приложения**
+*   Приложение А: Скрипты установки и настройки
+*   Приложение Б: Конфигурационные файлы (patroni.yml, etcd.conf)
+*   Приложение В: Результаты тестов производительности и отказоустойчивости
+
+---
+
+Это оглавление логично структурирует ваш объемный материал, отражает все ключевые этапы работы — от обоснования до практической реализации и тестирования. Оно соответствует стандартам для проектных работ и демонстрирует глубину проведенного исследования.
+
+[⬆️ К оглавлению](#оглавление)
+
+[⬆️ Оглавление](#оглавление)
+

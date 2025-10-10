@@ -1,0 +1,2 @@
+sudo -u postgres /opt/pgpro/1c-17/bin/psql -c "CREATE ROLE admindbps WITH SUPERUSER CREATEDB CREATEROLE LOGIN PASSWORD 'Keyjkbrbq64!' VALID UNTIL 'infinity';"
+psql: error: connection to server on socket "/tmp/.s.PGSQL.5432" failed: ВАЖНО:  база данных "admindbps" не существует
