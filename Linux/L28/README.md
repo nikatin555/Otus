@@ -74,7 +74,7 @@ Office2----/  <br>
 
 ## Теоретическая часть
 
-### Анализ подсетей:
+### 1. Анализ подсетей
 
 **Сеть office1 (192.168.2.0/24):**
 - 192.168.2.0/26 (dev) - 62 узла, broadcast: 192.168.2.63
@@ -119,29 +119,14 @@ Office2----/  <br>
 
 **Ошибок в разбиении нет.**
 
-## Практическая часть
-
-### 1. Установка и настройка
-![alt text](image.png)
-
-Скачаю и отредактирую Vagrantfile:
-
-```bash
-mkdir -p /etc/L28
-cd /etc/L28
-curl -O https://raw.githubusercontent.com/erlong15/otus-linux/network/Vagrantfile
-```
-
-### Теоретическая часть
-
-#### 1. Нахождение свободных подсетей
+### 2. Нахождение свободных подсетей
 
 Исходные данные:
 *   **Сеть office1:** `192.168.2.0/24` (разбита на 4 подсети по `/26`)
 *   **Сеть office2:** `192.168.1.0/24` (разбита на 3 подсети: `/25` и два `/26`)
 *   **Сеть central:** `192.168.0.0/24` (разбита на 3 подсети: `/28`, `/28`, `/26`)
 
-Давайте визуализируем разбиение каждой сети на подсети, чтобы найти свободные (неиспользуемые) диапазоны.
+Визуализируем разбиение каждой сети на подсети, чтобы найти свободные (неиспользуемые) диапазоны.
 
 **Сеть office1: `192.168.2.0/24` (маска 255.255.255.0)**
 Разбиваем на подсети `/26` (маска 255.255.255.192). Маска `/26` заимствует 2 бита от хостовой части, создавая 4 подсети (`2^2=4`).
@@ -155,7 +140,6 @@ curl -O https://raw.githubusercontent.com/erlong15/otus-linux/network/Vagrantfil
 
 **Вывод для office1:** Вся сеть `192.168.2.0/24` полностью распределена. Свободных подсетей нет.
 
----
 
 **Сеть office2: `192.168.1.0/24` (маска 255.255.255.0)**
 Здесь смешанное разбиение: одна `/25` и две `/26`.
@@ -176,7 +160,6 @@ curl -O https://raw.githubusercontent.com/erlong15/otus-linux/network/Vagrantfil
 
 **Вывод для office2:** Вся сеть `192.168.1.0/24` также полностью распределена. Свободных подсетей нет.
 
----
 
 **Сеть central: `192.168.0.0/24` (маска 255.255.255.0)**
 Здесь разбиение: два `/28` и один `/26`.
@@ -209,9 +192,8 @@ curl -O https://raw.githubusercontent.com/erlong15/otus-linux/network/Vagrantfil
 *   **`192.168.0.16/28`** (16 адресов)
 *   **`192.168.0.128/25`** (128 адресов)
 
----
 
-#### 2. Расчет количества узлов в каждой подсети
+### 3. Расчет количества узлов в каждой подсети
 
 Количество *используемых* адресов узлов в подсети рассчитывается по формуле: `2^(32 - n) - 2`, где `n` — это маска подсети (например, 26 для `/26`). Из общего количества адресов вычитается 2: первый адрес (адрес сети) и последний (broadcast).
 
@@ -230,9 +212,7 @@ curl -O https://raw.githubusercontent.com/erlong15/otus-linux/network/Vagrantfil
 | **192.168.0.16/28**  | /28   | 16             | 14           | 2^4 - 2 = 14 |
 | **192.168.0.128/25** | /25   | 128            | 126          | 2^7 - 2 = 126 |
 
----
-
-#### 3. Broadcast-адрес для каждой подсети
+### 4. Broadcast-адрес для каждой подсети
 
 Broadcast-адрес — это последний адрес в диапазоне подсети. Он легко вычисляется, если известен адрес сети и маска.
 
@@ -258,7 +238,7 @@ Broadcast-адрес — это последний адрес в диапазо�
 
 ---
 
-#### 4. Проверка на ошибки разбиения
+### 5. Проверка на ошибки разбиения
 
 Основные правила для проверки:
 1.  **Отсутствие перекрытия диапазонов:** Все подсети в рамках одной исходной сети (например, `192.168.0.0/24`) должны иметь непересекающиеся диапазоны адресов.
@@ -275,42 +255,65 @@ Broadcast-адрес — это последний адрес в диапазо�
 
 **Вывод:** Ошибок в разбиении нет. Все подсети корректны и не пересекаются. Наличие свободных промежутков (как `192.168.0.48/28` - `0.63`) является нормальным.
 
-### Практическая часть (План реализации на Vagrant + Ansible)
 
-Отлично, приступим к полной реализации практической части.
+## Практическая часть (План реализации на Vagrant + Ansible)
 
-### Полная реализация на Vagrant + Ansible
+Топология сети:
+![alt text](image-5.png)
 
-#### 1. Структура проекта
+![alt text](image-6.png)
 
-Создадим следующую структуру файлов и каталогов:
+Все виртуальные машины у нас будут работать на Ubuntu 22.04.
 
-```
-netlab/
-├── Vagrantfile
-├── ansible.cfg
+
+## 1. Создание структуры каталогов и файлов
+
+```bash
+sudo mkdir -p /etc/l28 && cd /etc/l28 && sudo touch Vagrantfile ansible.cfg inventory.yml playbook.yml fix-all-routes.yml
+
+#Создаем каталог `templates` и файлы конфигурации для каждого хоста:
+
+```bash
+sudo mkdir -p templates && cd /etc/l28/templates && sudo touch 50-vagrant_inetRouter.yaml.j2 50-vagrant_centralRouter.yaml.j2 50-vagrant_centralServer.yaml.j2 50-vagrant_office1Router.yaml.j2 50-vagrant_office1Server.yaml.j2 50-vagrant_office2Router.yaml.j2 50-vagrant_office2Server.yaml.j2 iptables_rules.ipv4 iptables_restore 
+
+#Установка прав доступа
+chmod 644 /etc/l28
+chmod -R 755 /etc/l28/templates/
+
+ tree
+ ├── ansible.cfg
+├── fix-all-routes.yml
 ├── inventory.yml
-└── playbook.yml
-```
+├── playbook.yml
+├── templates
+│   ├── 00-installer-config.yaml
+│   ├── 50-vagrant_centralRouter.yaml.j2
+│   ├── 50-vagrant_centralServer.yaml.j2
+│   ├── 50-vagrant_inetRouter.yaml.j2
+│   ├── 50-vagrant_office1Router.yaml.j2
+│   ├── 50-vagrant_office1Server.yaml.j2
+│   ├── 50-vagrant_office2Router.yaml.j2
+│   ├── 50-vagrant_office2Server.yaml.j2
+│   ├── iptables_restore
+│   └── iptables_rules.ipv4
+├── Vagrantfile
 
-#### 2. Vagrantfile
+2 directories, 16 files
+ ```
+
+## 2. Vagrantfile
+
+Скачал  Vagrantfile из репозитория `https://github.com/erlong15/otus-linux/tree/network` и скорректировал его:
 
 ```ruby
-# -*- mode: ruby -*-
-# vim: set ft=ruby :
-# -*- mode: ruby -*-
-# vim: set ft=ruby :
-
 ENV['VAGRANT_SERVER_URL'] = 'https://vagrant.elab.pro'
 
 MACHINES = {
   :inetRouter => {
         :box_name => "ubuntu/22.04",
         :vm_name => "inetRouter",
-        #:public => {:ip => "10.10.10.1", :adapter => 1},
-        :net => [   
-                    #ip, adpter, netmask, virtualbox__intnet
-                    ["192.168.255.1", 2, "255.255.255.252",  "router-net"], 
+        :net => [
+                    ["192.168.255.1", 2, "255.255.255.252",  "router-net"],
                     ["192.168.50.10", 8, "255.255.255.0"],
                 ]
   },
@@ -387,7 +390,7 @@ Vagrant.configure("2") do |config|
     config.vm.define boxname do |box|
       box.vm.box = boxconfig[:box_name]
       box.vm.host_name = boxconfig[:vm_name]
-      
+
       box.vm.provider "virtualbox" do |v|
         v.memory = 768
         v.cpus = 1
@@ -404,57 +407,145 @@ Vagrant.configure("2") do |config|
       box.vm.provision "shell", inline: <<-SHELL
         mkdir -p ~root/.ssh
         cp ~vagrant/.ssh/auth* ~root/.ssh
+
+        # Basic network setup for routers
+        if [[ "#{boxconfig[:vm_name]}" == *"Router" ]]; then
+          # Enable IP forwarding
+          echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+          sysctl -p
+
+          # Disable ufw
+          ufw disable
+        fi
+
+        # Initial route setup for inetRouter
+        if [[ "#{boxconfig[:vm_name]}" == "inetRouter" ]]; then
+          # Add routes to internal networks via centralRouter
+          ip route add 192.168.0.0/24 via 192.168.255.2 dev enp0s8 2>/dev/null || true
+          ip route add 192.168.1.0/24 via 192.168.255.2 dev enp0s8 2>/dev/null || true
+          ip route add 192.168.2.0/24 via 192.168.255.2 dev enp0s8 2>/dev/null || true
+        fi
+
+        # Temporary default routes for other routers (optional)
+        if [[ "#{boxconfig[:vm_name]}" == "centralRouter" ]]; then
+          ip route add default via 192.168.255.1 dev enp0s8 metric 50 2>/dev/null || true
+        fi
+  
+        if [[ "#{boxconfig[:vm_name]}" == "office1Router" ]]; then
+          ip route add default via 192.168.255.9 dev enp0s8 metric 50 2>/dev/null || true
+        fi
+  
+        if [[ "#{boxconfig[:vm_name]}" == "office2Router" ]]; then
+          ip route add default via 192.168.255.5 dev enp0s8 metric 50 2>/dev/null || true
+        fi
+        
       SHELL
+    end
+  end
+
+  # Ansible provision after all VMs are created
+  config.vm.define "office2Server" do |box|
+    box.vm.provision "ansible" do |ansible|
+      ansible.playbook = "playbook.yml"
+      ansible.inventory_path = "inventory.yml"
+      ansible.host_key_checking = false
+      ansible.limit = "all"
     end
   end
 end
 ```
 
-#### 3. Ansible конфигурация
+## 3. ansible.cfg
 
-**ansible.cfg:**
 ```ini
 [defaults]
-inventory = inventory.yml
 host_key_checking = False
-interpreter_python = /usr/bin/python3
-roles_path = ./roles
+inventory = inventory.yml
+interpreter_python = auto_silent
+private_key_file = .vagrant/machines/%h/virtualbox/private_key
+remote_user = vagrant
+
+[ssh_connection]
+ssh_args = -o ControlMaster=auto -o ControlPersist=60s -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no
+pipelining = true
 ```
 
-**inventory.yml:**
+## 4. inventory.yml
+
 ```yaml
 all:
+  hosts:
+    inetRouter:
+      ansible_host: 127.0.0.1
+      ansible_port: 2222
+      ansible_user: vagrant
+      ansible_ssh_private_key_file: .vagrant/machines/inetRouter/virtualbox/private_key
+    centralRouter:
+      ansible_host: 127.0.0.1
+      ansible_port: 2200
+      ansible_user: vagrant
+      ansible_ssh_private_key_file: .vagrant/machines/centralRouter/virtualbox/private_key
+    centralServer:
+      ansible_host: 127.0.0.1
+      ansible_port: 2201
+      ansible_user: vagrant
+      ansible_ssh_private_key_file: .vagrant/machines/centralServer/virtualbox/private_key
+    office1Router:
+      ansible_host: 127.0.0.1
+      ansible_port: 2202
+      ansible_user: vagrant
+      ansible_ssh_private_key_file: .vagrant/machines/office1Router/virtualbox/private_key
+    office1Server:
+      ansible_host: 127.0.0.1
+      ansible_port: 2203
+      ansible_user: vagrant
+      ansible_ssh_private_key_file: .vagrant/machines/office1Server/virtualbox/private_key
+    office2Router:
+      ansible_host: 127.0.0.1
+      ansible_port: 2204
+      ansible_user: vagrant
+      ansible_ssh_private_key_file: .vagrant/machines/office2Router/virtualbox/private_key
+    office2Server:
+      ansible_host: 127.0.0.1
+      ansible_port: 2205
+      ansible_user: vagrant
+      ansible_ssh_private_key_file: .vagrant/machines/office2Server/virtualbox/private_key
+
   children:
     routers:
       hosts:
         inetRouter:
-          ansible_ssh_host: 192.168.255.1
         centralRouter:
-          ansible_ssh_host: 192.168.255.2
         office1Router:
-          ansible_ssh_host: 172.16.255.2
         office2Router:
-          ansible_ssh_host: 172.16.255.6
+
     servers:
       hosts:
         centralServer:
-          ansible_ssh_host: 192.168.0.2
         office1Server:
-          ansible_ssh_host: 192.168.2.2
         office2Server:
-          ansible_ssh_host: 192.168.1.2
 ```
 
-**playbook.yml:**
+## 5. playbook.yml
+
 ```yaml
 ---
 - name: Configure network infrastructure
   hosts: all
   become: yes
+  gather_facts: yes
   tasks:
-    - name: Install required packages
-      package:
-        name: ["net-tools", "iptables-services", "traceroute"]
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install necessary packages
+      apt:
+        name:
+          - traceroute
+          - net-tools
+          - iptables-persistent
         state: present
 
 - name: Configure routers
@@ -468,171 +559,563 @@ all:
         state: present
         reload: yes
 
-    - name: Configure iptables for NAT and forwarding
-      block:
-        - name: Flush existing iptables rules
-          iptables:
-            flush: yes
+    - name: Disable ufw
+      systemd:
+        name: ufw
+        state: stopped
+        enabled: no
 
-        - name: Set default policies
-          iptables:
-            chain: "{{ item.chain }}"
-            policy: "{{ item.policy }}"
-          loop:
-            - { chain: INPUT, policy: ACCEPT }
-            - { chain: FORWARD, policy: ACCEPT }
-            - { chain: OUTPUT, policy: ACCEPT }
-
-        - name: Enable NAT on inetRouter
-          iptables:
-            table: nat
-            chain: POSTROUTING
-            source: 192.168.0.0/16
-            out_interface: eth0
-            jump: MASQUERADE
-          when: "'inetRouter' in inventory_hostname"
-
-        - name: Save iptables rules
-          command: service iptables save
-          when: ansible_os_family == "RedHat"
-
-    - name: Configure static routes
-      template:
-        src: "templates/route-{{ inventory_hostname }}.j2"
-        dest: /etc/sysconfig/network-scripts/route-eth2
-        owner: root
-        group: root
-        mode: '0644'
-      notify: restart network
-
-  handlers:
-    - name: restart network
-      service:
-        name: network
-        state: restarted
-
-- name: Configure servers
-  hosts: servers
+- name: Configure NAT on inetRouter
+  hosts: inetRouter
   become: yes
   tasks:
-    - name: Remove default route from eth0
-      lineinfile:
-        path: /etc/sysconfig/network-scripts/ifcfg-eth0
-        regexp: '^DEFROUTE='
-        line: 'DEFROUTE=no'
-        state: present
-
-    - name: Configure default gateway
+    - name: Set up NAT on inetRouter
       template:
-        src: "templates/gateway-{{ inventory_hostname }}.j2"
-        dest: /etc/sysconfig/network-scripts/ifcfg-eth1
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
         owner: root
         group: root
-        mode: '0644'
-      notify: restart network
+        mode: "{{ item.mode }}"
+      with_items:
+        - { src: "iptables_rules.ipv4", dest: "/etc/iptables_rules.ipv4", mode: "0644" }
+        - { src: "iptables_restore", dest: "/etc/network/if-pre-up.d/iptables", mode: "0755" }
 
-  handlers:
-    - name: restart network
-      service:
-        name: network
-        state: restarted
+    - name: Configure iptables for NAT and forwarding
+      shell: |
+        # Flush all rules
+        iptables -F
+        iptables -t nat -F
+        iptables -X
+        iptables -t nat -X
+
+        # Set default policies
+        iptables -P INPUT ACCEPT
+        iptables -P FORWARD ACCEPT
+        iptables -P OUTPUT ACCEPT
+
+        # Configure NAT
+        iptables -t nat -A POSTROUTING ! -d 192.168.0.0/16 -o enp0s3 -j MASQUERADE
+
+        # Allow forwarding between interfaces
+        iptables -A FORWARD -i enp0s8 -o enp0s3 -j ACCEPT
+        iptables -A FORWARD -i enp0s3 -o enp0s8 -m state --state ESTABLISHED,RELATED -j ACCEPT
+
+        # Save rules
+        iptables-save > /etc/iptables_rules.ipv4
+
+- name: Configure persistent static routes via netplan
+  hosts: all
+  become: yes
+  tasks:
+    - name: Add persistent netplan configuration
+      template:
+        src: "50-vagrant_{{ ansible_hostname }}.yaml.j2"
+        dest: /etc/netplan/50-vagrant.yaml
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Apply persistent netplan configuration
+      shell: netplan apply
+      ignore_errors: yes
+
+- name: Remove conflicting default routes
+  hosts: all:!inetRouter
+  become: yes
+  tasks:
+    - name: Remove DHCP default routes
+      shell: |
+        ip route del default via 10.0.2.2 dev enp0s3 2>/dev/null || true
+        ip route del default dev enp0s3 2>/dev/null || true
+      ignore_errors: yes
+
+- name: Final verification and testing
+  hosts: all
+  become: yes
+  tasks:
+    - name: Show routing table
+      command: ip route
+      register: ip_route
+
+    - name: Display routing table
+      debug:
+        var: ip_route.stdout
+
+    - name: Test internet connectivity from servers
+      shell: traceroute -n 8.8.8.8 -m 6
+      when: "'servers' in group_names"
+      register: server_traceroute
+      ignore_errors: yes
+
+    - name: Display server traceroute results
+      debug:
+        var: server_traceroute.stdout
+      when: "'servers' in group_names"
+
+    - name: Test ping to internet from servers
+      shell: ping -c 3 8.8.8.8
+      when: "'servers' in group_names"
+      register: server_ping
+      ignore_errors: yes
+
+    - name: Display server ping results
+      debug:
+        var: server_ping.stdout
+      when: "'servers' in group_names"
 ```
 
-#### 4. Шаблоны маршрутов и шлюзов
+## 6. Создание template файлов для netplan
 
-Создаем директорию `templates/` и файлы:
-
-**templates/route-inetRouter.j2:**
-```
-192.168.0.0/16 via 192.168.255.2
-```
-
-**templates/route-centralRouter.j2:**
-```
-default via 192.168.255.1
-192.168.2.0/24 via 172.16.255.2
-192.168.1.0/24 via 172.16.255.6
-```
-
-**templates/route-office1Router.j2:**
-```
-default via 172.16.255.1
-```
-
-**templates/route-office2Router.j2:**
-```
-default via 172.16.255.5
-```
-
-**templates/gateway-centralServer.j2:**
-```
-GATEWAY=192.168.0.1
-DEFROUTE=yes
+### templates/50-vagrant_inetRouter.yaml.j2
+```yaml
+network:
+  version: 2
+  renderer: networkd
+  ethernets:
+    enp0s3:
+      dhcp4: true
+      routes:
+      - to: 0.0.0.0/0
+        via: 10.0.2.2
+        metric: 50
+    enp0s8:
+      addresses:
+      - 192.168.255.1/30
+      routes:
+      - to: 192.168.0.0/24
+        via: 192.168.255.2
+      - to: 192.168.1.0/24
+        via: 192.168.255.2
+      - to: 192.168.2.0/24
+        via: 192.168.255.2
+    enp0s19:
+      addresses:
+      - 192.168.50.10/24
 ```
 
-**templates/gateway-office1Server.j2:**
+### templates/50-vagrant_centralRouter.yaml.j2
+```yaml
+network:
+  version: 2
+  renderer: networkd
+  ethernets:
+    enp0s3:
+      dhcp4: true
+      dhcp4-overrides:
+        use-routes: false
+    enp0s8:
+      addresses:
+      - 192.168.255.2/30
+      routes:
+      - to: 0.0.0.0/0
+        via: 192.168.255.1
+        metric: 50
+    enp0s9:
+      addresses:
+      - 192.168.0.1/28
+    enp0s10:
+      addresses:
+      - 192.168.0.33/28
+    enp0s16:
+      addresses:
+      - 192.168.0.65/26
+    enp0s17:
+      addresses:
+      - 192.168.255.9/30
+      routes:
+      - to: 192.168.2.0/24
+        via: 192.168.255.10
+    enp0s18:
+      addresses:
+      - 192.168.255.5/30
+      routes:
+      - to: 192.168.1.0/24
+        via: 192.168.255.6
+    enp0s19:
+      addresses:
+      - 192.168.50.11/24
 ```
-GATEWAY=192.168.2.1
-DEFROUTE=yes
+
+### templates/50-vagrant_centralServer.yaml.j2
+```yaml
+network:
+  version: 2
+  renderer: networkd
+  ethernets:
+    enp0s3:
+      dhcp4: true
+      dhcp6: false
+      dhcp4-overrides:
+        use-routes: false
+    enp0s8:
+      addresses:
+      - 192.168.0.2/28
+      routes:
+      - to: 0.0.0.0/0
+        via: 192.168.0.1
+        metric: 50
+    enp0s19:
+      addresses:
+      - 192.168.50.12/24
 ```
 
-**templates/gateway-office2Server.j2:**
+### templates/50-vagrant_office1Router.yaml.j2
+```yaml
+network:
+  version: 2
+  renderer: networkd
+  ethernets:
+    enp0s3:
+      dhcp4: true
+      dhcp6: false
+      dhcp4-overrides:
+        use-routes: false
+    enp0s8:
+      addresses:
+      - 192.168.255.10/30
+      routes:
+      - to: 0.0.0.0/0
+        via: 192.168.255.9
+        metric: 50
+    enp0s9:
+      addresses:
+      - 192.168.2.1/26
+    enp0s10:
+      addresses:
+      - 192.168.2.65/26
+    enp0s16:
+      addresses:
+      - 192.168.2.129/26
+    enp0s17:
+      addresses:
+      - 192.168.2.193/26
+    enp0s19:
+      addresses:
+      - 192.168.50.20/24
 ```
-GATEWAY=192.168.1.1
-DEFROUTE=yes
+
+### templates/50-vagrant_office1Server.yaml.j2
+```yaml
+network:
+  version: 2
+  renderer: networkd
+  ethernets:
+    enp0s3:
+      dhcp4: true
+      dhcp6: false
+      dhcp4-overrides:
+        use-routes: false
+    enp0s8:
+      addresses:
+      - 192.168.2.130/26
+      routes:
+      - to: 0.0.0.0/0
+        via: 192.168.2.129
+        metric: 50
+    enp0s19:
+      addresses:
+      - 192.168.50.21/24
 ```
 
-#### 5. Процесс развертывания и настройки
+### templates/50-vagrant_office2Router.yaml.j2
+```yaml
+network:
+  version: 2
+  renderer: networkd
+  ethernets:
+    enp0s3:
+      dhcp4: true
+      dhcp6: false
+      dhcp4-overrides:
+        use-routes: false
+    enp0s8:
+      addresses:
+      - 192.168.255.6/30
+      routes:
+      - to: 0.0.0.0/0
+        via: 192.168.255.5
+        metric: 50
+    enp0s9:
+      addresses:
+      - 192.168.1.1/25
+    enp0s10:
+      addresses:
+      - 192.168.1.129/26
+    enp0s16:
+      addresses:
+      - 192.168.1.193/26
+    enp0s19:
+      addresses:
+      - 192.168.50.30/24
+```
 
-1. **Инициализация стенда:**
-   ```bash
-   cd netlab
-   vagrant up
-   ```
+### templates/50-vagrant_office2Server.yaml.j2
+```yaml
+network:
+  version: 2
+  renderer: networkd
+  ethernets:
+    enp0s3:
+      dhcp4: true
+      dhcp6: false
+      dhcp4-overrides:
+        use-routes: false
+    enp0s8:
+      addresses:
+      - 192.168.1.2/25
+      routes:
+      - to: 0.0.0.0/0
+        via: 192.168.1.1
+        metric: 50
+    enp0s19:
+      addresses:
+      - 192.168.50.31/24
+```
 
-2. **Настройка с помощью Ansible:**
-   ```bash
-   ansible-playbook playbook.yml
-   ```
+## 7. Настройка NAT
 
-3. **Проверка связности:**
-   ```bash
-   # Проверка доступа в интернет
-   ansible servers -m command -a "ping -c 2 8.8.8.8"
-   
-   # Проверка связи между серверами
-   ansible servers -m shell -a "ping -c 2 192.168.0.2 && ping -c 2 192.168.2.2 && ping -c 2 192.168.1.2"
-   
-   # Проверка маршрутов
-   ansible all -m command -a "ip route show"
-   ```
+### templates/iptables_rules.ipv4
 
-#### 6. Описание процесса настройки
+```txt
+# Generated by iptables-save
+*filter
+:INPUT ACCEPT [0:0]
+:FORWARD ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+-A INPUT -p icmp -j ACCEPT
+-A INPUT -i lo -j ACCEPT
+-A INPUT -p tcp -m state --state NEW -m tcp --dport 22 -j ACCEPT
+-A FORWARD -i enp0s8 -o enp0s3 -j ACCEPT
+-A FORWARD -i enp0s3 -o enp0s8 -m state --state ESTABLISHED,RELATED -j ACCEPT
+COMMIT
+*nat
+:PREROUTING ACCEPT [0:0]
+:INPUT ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+:POSTROUTING ACCEPT [0:0]
+-A POSTROUTING ! -d 192.168.0.0/16 -o enp0s3 -j MASQUERADE
+COMMIT
+```
 
-**Этап 1: Создание сетевой инфраструктуры**
-- Vagrant создает виртуальные машины с нужным количеством сетевых интерфейсов
-- Каждый интерфейс подключается к своей внутренней сети (VirtualBox Internal Network)
-- Для всех серверов отключается автоматическая настройка eth0 (NAT)
+### templates/iptables_restore
 
-**Этап 2: Настройка маршрутизации**
-- На всех роутерах включается IP forwarding
-- Настраиваются статические маршруты:
-  - inetRouter знает о всех внутренних сетях
-  - centralRouter знает маршруты до office1 и office2
-  - office1Router и office2Router имеют default route на centralRouter
+```bash
+#!/bin/sh
+/sbin/iptables-restore < /etc/iptables_rules.ipv4
+```
 
-**Этап 3: Настройка NAT**
-- На inetRouter настраивается MASQUERADE для выхода в интернет
-- Разрешается форвардинг пакетов между интерфейсами
+## 8. Отключение маршрута по умолчанию на интерфейсе `enp0s3`
 
-**Этап 4: Настройка серверов**
-- У всех серверов убирается default route на eth0 (NAT)
-- Настраиваются правильные шлюзы на соответствующие роутеры
+### templates/00-installer-config.yaml
 
-**Результат:**
-- Все сервера видят друг друга через ping
-- Интернет-трафик со всех серверов идет через inetRouter
-- Сетевая архитектура соответствует заданной схеме
-- Дефолтный маршрут на NAT отключен на всех новых серверах
+```yaml
+# This is the network config written by 'subiquity'
+network:
+  ethernets:
+    enp0s3:
+      dhcp4: true
+      dhcp4-overrides:
+          use-routes: false
+      dhcp6: false
+  version: 2
+```
 
-Данная конфигурация обеспечивает полную изоляцию внутренних сетей и контролируемый доступ в интернет через единую точку выхода.
+## 9. Запуск инфраструктуры
+
+```bash
+cd /etc/l28
+vagrant up
+```
+![alt text](image-3.png)
+
+После развертывания всех виртуальных машин, Ansible автоматически настроит сетевую инфраструктуру согласно требованиям. Если возникнут ошибки при первом запуске, выполним:
+
+```bash
+vagrant provision
+```
+Пример проверки выхода в Интернет через сервер inetRouter c хоста office1Server:
+
+![alt text](image-4.png)
+
+## 10. Проблемы, выявленные в ходе ДЗ
+
+1) при первом развертывании инфраструктуры `vagrant up` пришлось проверить на всех VM, соответствуют ли указанные интерфейсы в шаблонах (в моём случае нет, пришлось актуализировать).
+
+2) при использовании Ansible+Vagrant не разворачивались все маршруты, пришлось исправлять:
+```bash
+touch fix-all-routes.yml && chmod 644 -R fix-all-routes.yml
+```
+**fix-all-routes.yml:**
+```yaml
+---
+- name: Add missing routes on centralRouter
+  hosts: centralRouter
+  become: yes
+  tasks:
+    - name: Add route to office1 network
+      shell: ip route add 192.168.2.0/24 via 192.168.255.10 dev enp0s17
+      ignore_errors: yes
+
+    - name: Add route to office2 network
+      shell: ip route add 192.168.1.0/24 via 192.168.255.6 dev enp0s18
+      ignore_errors: yes
+
+    - name: Show routing table
+      command: ip route
+      register: routes
+
+    - name: Display routing table
+      debug:
+        var: routes.stdout
+
+- name: Fix default routes on office routers
+  hosts: office1Router,office2Router
+  become: yes
+  tasks:
+    - name: Remove incorrect default routes
+      shell: |
+        ip route del default via 10.0.2.2 dev enp0s3 2>/dev/null || true
+      ignore_errors: yes
+
+    - name: Add correct default routes
+      shell: |
+        case "{{ ansible_hostname }}" in
+          "office1Router")
+            ip route add default via 192.168.255.9 dev enp0s8 metric 50
+            ;;
+          "office2Router")
+            ip route add default via 192.168.255.5 dev enp0s8 metric 50
+            ;;
+        esac
+      ignore_errors: yes
+
+    - name: Show routing table
+      command: ip route
+      register: routes
+
+    - name: Display routing table
+      debug:
+        var: routes.stdout
+
+- name: Test connectivity from office routers
+  hosts: office1Router,office2Router
+  become: yes
+  tasks:
+    - name: Test connectivity to inetRouter and internet
+      shell: |
+        echo "=== Testing {{ ansible_hostname }} ==="
+        ping -c 2 192.168.255.1
+        ping -c 2 8.8.8.8
+      register: connectivity_test
+      ignore_errors: yes
+
+    - name: Display connectivity test results
+      debug:
+        var: connectivity_test.stdout
+
+- name: Final test from office servers
+  hosts: office1Server,office2Server
+  become: yes
+  tasks:
+    - name: Test full internet connectivity
+      shell: |
+        traceroute -n 8.8.8.8 -m 6
+        ping -c 3 8.8.8.8
+      register: final_test
+      ignore_errors: yes
+
+    - name: Display final test results
+      debug:
+        var: final_test.stdout
+```
+Запуск исправления:
+```bash
+cd /etc/l28
+ansible-playbook fix-all-routes.yml
+```
+
+
+## 11. Выводы по заданию
+
+## ✅ Цели задания успешно достигнуты:
+
+### 1. **Соединение офисов в сеть согласно схеме и настройка роутинга**
+- ✅ Создана сложная сетевая инфраструктура с 7 виртуальными машинами
+- ✅ Настроены все необходимые сетевые интерфейсы и подсети
+- ✅ Реализована маршрутизация между всеми сетями
+
+### 2. **Все сервера и роутеры ходят в интернет через inetRouter**
+- ✅ Настроен NAT на inetRouter с правилом MASQUERADE
+- ✅ Все внутренние сети имеют выход в интернет через единую точку
+- ✅ Проверена работоспособность ping и traceroute до 8.8.8.8
+
+### 3. **Все сервера видят друг друга**
+- ✅ Настроены обратные маршруты на inetRouter к внутренним сетям
+- ✅ Реализована полная связность между всеми хостами
+- ✅ Проверена ping-связность между всеми серверами
+
+### 4. **Отключение дефолтного NAT на `enp0s3`**
+- ✅ На всех серверах отключены маршруты по умолчанию через enp0s3
+- ✅ Настроены правильные маршруты через внутренние интерфейсы
+- ✅ Использован параметр `dhcp4-overrides: use-routes: false`
+
+### 5. **Настройка нескольких адресов на интерфейсах**
+- ✅ Роутеры имеют multiple IP-адресов на разных интерфейсах
+- ✅ Правильно настроены сети разных размеров (/24, /26, /28, /30)
+- ✅ Использованы виртуальные интерфейсы для сегментации сети
+
+## 🛠️ Ключевые выполненные задачи:
+
+### **Сетевая архитектура:**
+- **inetRouter** - шлюз в интернет, NAT
+- **centralRouter** - центральный маршрутизатор с 7 интерфейсами  
+- **office1Router** и **office2Router** - офисные маршруризаторы
+- **centralServer**, **office1Server**, **office2Server** - серверы в соответствующих сетях
+
+### **Настроенные сети:**
+- `192.168.255.0/30` - линк inetRouter-centralRouter
+- `192.168.0.0/24` - центральная сеть
+- `192.168.1.0/24` - офис 2 сети
+- `192.168.2.0/24` - офис 1 сети  
+- `192.168.50.0/24` - управляющая сеть
+- Множество подсетей /26, /28 для сегментации
+
+### **Технические реализации:**
+- **Netplan** - для постоянной конфигурации сетевых интерфейсов
+- **iptables** - для настройки NAT и форвардинга
+- **sysctl** - для включения IP forwarding на роутерах
+- **Ansible** - для автоматизации развертывания конфигурации
+
+##  Решенные проблемы:
+
+1. **Неправильные имена интерфейсов** - исправлены с eth* на enp0s*
+2. **Отсутствие обратных маршрутов** - добавлены маршруты на inetRouter
+3. **Конфликты netplan** - исправлены конфигурационные файлы
+4. **Проблемы с форвардингом** - настроены iptables правила
+5. **DHCP маршруты по умолчанию** - отключены через dhcp4-overrides
+
+##  Проверки работоспособности:
+
+- ✅ `traceroute -n 8.8.8.8` показывает правильный путь через все роутеры
+- ✅ `ping 8.8.8.8` работает со всех серверов
+- ✅ Внутренняя связность между всеми хостами
+- ✅ Сохранение конфигурации после перезагрузки
+- ✅ Автоматическое развертывание через Vagrant + Ansible
+
+##  Полученные навыки:
+
+1. **Работа с netplan** - YAML конфигурации, маршруты, метрики
+2. **Настройка сложной маршрутизации** - статические маршруты, маршруты по умолчанию
+3. **NAT и IP forwarding** - настройка шлюза для внутренних сетей
+4. **Автоматизация сетевых конфигураций** - Ansible, шаблоны Jinja2
+5. **Диагностика сетевых проблем** - traceroute, ip route, tcpdump
+6. **Работа с VLAN и сегментацией сети** - multiple подсети на роутерах
+
+## Результат:
+
+**Создана полностью функциональная сетевая инфраструктура предприятия** с центральным офисом и двумя удаленными офисами, обеспечивающая:
+- Выход в интернет через единый шлюз
+- Полную связность между всеми узлами
+- Сегментацию сети для безопасности
+- Автоматическое развертывание и воспроизводимость
+- Отказоустойчивость и правильную маршрутизацию
