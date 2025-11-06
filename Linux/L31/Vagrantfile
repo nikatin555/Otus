@@ -1,0 +1,82 @@
+ENV['VAGRANT_DEFAULT_PROVIDER'] = 'virtualbox'
+ENV['VAGRANT_SERVER_URL'] = 'https://vagrant.elab.pro'
+
+Vagrant.configure("2") do |config|
+  # Router1
+  config.vm.define "router1" do |router|
+    router.vm.box = "bento/ubuntu-24.04"
+    router.vm.host_name = "router1"
+    
+    router.vm.network "private_network", ip: "10.0.10.1", netmask: "255.255.255.252", virtualbox__intnet: "r1-r2"
+    router.vm.network "private_network", ip: "10.0.12.1", netmask: "255.255.255.252", virtualbox__intnet: "r1-r3"
+    router.vm.network "private_network", ip: "192.168.10.1", netmask: "255.255.255.0", virtualbox__intnet: "net1"
+    router.vm.network "private_network", ip: "192.168.50.10", netmask: "255.255.255.0"
+    
+    # Базовая настройка
+    router.vm.provision "shell", inline: <<-SHELL
+      # Обновление и установка Python для Ansible
+      apt-get update
+      DEBIAN_FRONTEND=noninteractive apt-get install -y python3 python3-apt
+      
+      # Включение IP forwarding
+      echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.conf
+      sysctl -p
+      
+      # Отключение UFW
+      ufw disable
+    SHELL
+
+    router.vm.provider "virtualbox" do |vb|
+      vb.memory = "1024"
+      vb.cpus = 1
+    end
+  end
+
+  # Router2
+  config.vm.define "router2" do |router|
+    router.vm.box = "bento/ubuntu-24.04"
+    router.vm.host_name = "router2"
+    
+    router.vm.network "private_network", ip: "10.0.10.2", netmask: "255.255.255.252", virtualbox__intnet: "r1-r2"
+    router.vm.network "private_network", ip: "10.0.11.2", netmask: "255.255.255.252", virtualbox__intnet: "r2-r3"
+    router.vm.network "private_network", ip: "192.168.20.1", netmask: "255.255.255.0", virtualbox__intnet: "net2"
+    router.vm.network "private_network", ip: "192.168.50.11", netmask: "255.255.255.0"
+    
+    router.vm.provision "shell", inline: <<-SHELL
+      apt-get update
+      DEBIAN_FRONTEND=noninteractive apt-get install -y python3 python3-apt
+      echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.conf
+      sysctl -p
+      ufw disable
+    SHELL
+
+    router.vm.provider "virtualbox" do |vb|
+      vb.memory = "1024"
+      vb.cpus = 1
+    end
+  end
+
+  # Router3
+  config.vm.define "router3" do |router|
+    router.vm.box = "bento/ubuntu-24.04"
+    router.vm.host_name = "router3"
+    
+    router.vm.network "private_network", ip: "10.0.11.1", netmask: "255.255.255.252", virtualbox__intnet: "r2-r3"
+    router.vm.network "private_network", ip: "10.0.12.2", netmask: "255.255.255.252", virtualbox__intnet: "r1-r3"
+    router.vm.network "private_network", ip: "192.168.30.1", netmask: "255.255.255.0", virtualbox__intnet: "net3"
+    router.vm.network "private_network", ip: "192.168.50.12", netmask: "255.255.255.0"
+    
+    router.vm.provision "shell", inline: <<-SHELL
+      apt-get update
+      DEBIAN_FRONTEND=noninteractive apt-get install -y python3 python3-apt
+      echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.conf
+      sysctl -p
+      ufw disable
+    SHELL
+
+    router.vm.provider "virtualbox" do |vb|
+      vb.memory = "1024"
+      vb.cpus = 1
+    end
+  end
+end
