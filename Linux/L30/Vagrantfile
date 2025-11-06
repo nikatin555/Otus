@@ -1,0 +1,302 @@
+ENV['VAGRANT_SERVER_URL'] = 'https://vagrant.elab.pro'
+
+Vagrant.configure("2") do |config|
+  config.vm.box = "almalinux/9"
+  
+  # inetRouter
+  config.vm.define "inetRouter" do |inetRouter|
+    inetRouter.vm.hostname = "inetRouter"
+    inetRouter.vm.network "private_network", ip: "192.168.255.10", virtualbox__intnet: "network1"
+    inetRouter.vm.network "private_network", ip: "192.168.0.10", virtualbox__intnet: "network2"
+    inetRouter.vm.network "forwarded_port", guest: 22, host: 2210, id: "ssh"
+    
+    inetRouter.vm.provider "virtualbox" do |vb|
+      vb.memory = "512"
+      vb.cpus = 1
+    end
+
+    inetRouter.vm.provision "shell", inline: <<-SHELL
+      # Отключение SELinux
+      setenforce 0
+      sed -i 's/^SELINUX=.*/SELINUX=disabled/' /etc/selinux/config
+      
+      # Установка пакетов
+      dnf update -y
+      dnf install -y iptables iptables-services nftables knock-server nginx net-tools tcpdump
+      
+      # Включение iptables
+      systemctl enable iptables
+      systemctl start iptables
+      
+      # Очистка правил
+      iptables -F
+      iptables -X
+      iptables -t nat -F
+      iptables -t nat -X
+      
+      # Базовые правила
+      iptables -P INPUT DROP
+      iptables -P FORWARD DROP
+      iptables -P OUTPUT ACCEPT
+      
+      iptables -A INPUT -i lo -j ACCEPT
+      iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+      iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+      
+      # Port knocking порты
+      iptables -A INPUT -p tcp --dport 1111 -j DROP
+      iptables -A INPUT -p tcp --dport 2222 -j DROP
+      iptables -A INPUT -p tcp --dport 3333 -j DROP
+      
+      # NAT для интернета
+      iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+      iptables -A FORWARD -j ACCEPT
+      
+      # Включение IP forwarding
+      echo 'net.ipv4.ip_forward = 1' >> /etc/sysctl.conf
+      sysctl -p
+      
+      # Настройка knockd
+      cat > /etc/knockd.conf << 'EOF'
+[options]
+    logfile = /var/log/knockd.log
+    interface = eth1
+
+[openSSH]
+    sequence = 1111,2222,3333
+    seq_timeout = 10
+    command = /usr/sbin/iptables -I INPUT -s %IP% -p tcp --dport 22 -j ACCEPT
+    tcpflags = syn
+
+[closeSSH]
+    sequence = 3333,2222,1111
+    seq_timeout = 10
+    command = /usr/sbin/iptables -D INPUT -s %IP% -p tcp --dport 22 -j ACCEPT
+    tcpflags = syn
+EOF
+      
+      # Запуск knockd
+      systemctl enable knockd
+      systemctl start knockd
+      
+      # Сохранение правил
+      iptables-save > /etc/sysconfig/iptables
+    SHELL
+  end
+
+  # inetRouter2
+  config.vm.define "inetRouter2" do |inetRouter2|
+    inetRouter2.vm.hostname = "inetRouter2"
+    inetRouter2.vm.network "private_network", ip: "192.168.255.20", virtualbox__intnet: "network1"
+    inetRouter2.vm.network "private_network", ip: "192.168.1.10", virtualbox__intnet: "network3"
+    inetRouter2.vm.network "forwarded_port", guest: 22, host: 2211, id: "ssh"
+    inetRouter2.vm.network "forwarded_port", guest: 8080, host: 8080, host_ip: "127.0.0.1"
+    
+    inetRouter2.vm.provider "virtualbox" do |vb|
+      vb.memory = "512"
+      vb.cpus = 1
+    end
+
+    inetRouter2.vm.provision "shell", inline: <<-SHELL
+      # Отключение SELinux
+      setenforce 0
+      sed -i 's/^SELINUX=.*/SELINUX=disabled/' /etc/selinux/config
+      
+      # Установка пакетов
+      dnf update -y
+      dnf install -y iptables iptables-services nftables nginx net-tools
+      
+      # Включение iptables
+      systemctl enable iptables
+      systemctl start iptables
+      
+      # Очистка правил
+      iptables -F
+      iptables -X
+      iptables -t nat -F
+      iptables -t nat -X
+      
+      # Базовые правила
+      iptables -P INPUT DROP
+      iptables -P FORWARD DROP
+      iptables -P OUTPUT ACCEPT
+      
+      iptables -A INPUT -i lo -j ACCEPT
+      iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+      iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+      iptables -A INPUT -p tcp --dport 8080 -j ACCEPT
+      
+      # Включение IP forwarding
+      echo 'net.ipv4.ip_forward = 1' >> /etc/sysctl.conf
+      sysctl -p
+      
+      # Настройка nginx как прокси
+      cat > /etc/nginx/conf.d/8080.conf << 'EOF'
+server {
+    listen 8080;
+    server_name _;
+    
+    location / {
+        proxy_pass http://192.168.2.20:80;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+EOF
+      
+      # Запуск nginx
+      systemctl enable nginx
+      systemctl start nginx
+      
+      # Сохранение правил
+      iptables-save > /etc/sysconfig/iptables
+    SHELL
+  end
+
+  # centralRouter
+  config.vm.define "centralRouter" do |centralRouter|
+    centralRouter.vm.hostname = "centralRouter"
+    centralRouter.vm.network "private_network", ip: "192.168.0.20", virtualbox__intnet: "network2"
+    centralRouter.vm.network "private_network", ip: "192.168.2.10", virtualbox__intnet: "network4"
+    centralRouter.vm.network "forwarded_port", guest: 22, host: 2212, id: "ssh"
+    
+    centralRouter.vm.provider "virtualbox" do |vb|
+      vb.memory = "512"
+      vb.cpus = 1
+    end
+
+    centralRouter.vm.provision "shell", inline: <<-SHELL
+      # Отключение SELinux
+      setenforce 0
+      sed -i 's/^SELINUX=.*/SELINUX=disabled/' /etc/selinux/config
+      
+      # Установка пакетов
+      dnf update -y
+      dnf install -y iptables iptables-services nftables net-tools
+      
+      # Включение iptables
+      systemctl enable iptables
+      systemctl start iptables
+      
+      # Очистка правил
+      iptables -F
+      iptables -X
+      iptables -t nat -F
+      iptables -t nat -X
+      
+      # Базовые правила
+      iptables -P INPUT DROP
+      iptables -P FORWARD ACCEPT
+      iptables -P OUTPUT ACCEPT
+      
+      iptables -A INPUT -i lo -j ACCEPT
+      iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+      iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+      
+      # Включение IP forwarding
+      echo 'net.ipv4.ip_forward = 1' >> /etc/sysctl.conf
+      sysctl -p
+      
+      # Маршрутизация
+      ip route del default via 10.0.2.2 2>/dev/null || true
+      ip route add default via 192.168.0.10
+      ip route add 192.168.1.0/24 via 192.168.0.10
+      ip route add 192.168.255.0/24 via 192.168.0.10
+      
+      # Knock скрипт
+      cat > /usr/local/bin/knock-ssh << 'EOF'
+#!/bin/bash
+HOST=192.168.0.10
+echo "Knocking ports 1111, 2222, 3333 on \$HOST"
+for port in 1111 2222 3333; do
+    timeout 1 bash -c "echo > /dev/tcp/\$HOST/\$port" 2>/dev/null && echo "Port \$port: knocked" || echo "Port \$port: closed"
+    sleep 0.5
+done
+echo "Knock sequence completed. Try: ssh vagrant@192.168.0.10"
+EOF
+      
+      chmod +x /usr/local/bin/knock-ssh
+      
+      # Настройка SSH ключей
+      ssh-keygen -t rsa -N '' -f /home/vagrant/.ssh/id_rsa <<< y
+      cat /home/vagrant/.ssh/id_rsa.pub >> /home/vagrant/.ssh/authorized_keys
+      chmod 600 /home/vagrant/.ssh/authorized_keys
+      
+      # Сохранение правил
+      iptables-save > /etc/sysconfig/iptables
+    SHELL
+  end
+
+  # centralServer
+  config.vm.define "centralServer" do |centralServer|
+    centralServer.vm.hostname = "centralServer"
+    centralServer.vm.network "private_network", ip: "192.168.2.20", virtualbox__intnet: "network4"
+    centralServer.vm.network "forwarded_port", guest: 22, host: 2213, id: "ssh"
+    centralServer.vm.network "forwarded_port", guest: 80, host: 8081, id: "http"
+    
+    centralServer.vm.provider "virtualbox" do |vb|
+      vb.memory = "1024"
+      vb.cpus = 1
+    end
+
+    centralServer.vm.provision "shell", inline: <<-SHELL
+      # Отключение SELinux
+      setenforce 0
+      sed -i 's/^SELINUX=.*/SELINUX=disabled/' /etc/selinux/config
+      
+      # Установка пакетов
+      dnf update -y
+      dnf install -y iptables iptables-services nftables nginx net-tools
+      
+      # Включение iptables
+      systemctl enable iptables
+      systemctl start iptables
+      
+      # Очистка правил
+      iptables -F
+      iptables -X
+      iptables -t nat -F
+      iptables -t nat -X
+      
+      # Базовые правила
+      iptables -P INPUT DROP
+      iptables -P FORWARD DROP
+      iptables -P OUTPUT ACCEPT
+      
+      iptables -A INPUT -i lo -j ACCEPT
+      iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+      iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+      iptables -A INPUT -p tcp --dport 80 -j ACCEPT
+      
+      # Маршрутизация
+      ip route del default via 10.0.2.2 2>/dev/null || true
+      ip route add default via 192.168.2.10
+      ip route add 192.168.0.0/24 via 192.168.2.10
+      ip route add 192.168.1.0/24 via 192.168.2.10
+      ip route add 192.168.255.0/24 via 192.168.2.10
+      
+      # Настройка nginx
+      systemctl enable nginx
+      systemctl start nginx
+      
+      # Тестовая страница
+      cat > /usr/share/nginx/html/index.html << 'EOF'
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Central Server</title>
+</head>
+<body>
+    <h1>Welcome to Central Server</h1>
+    <p>This server is accessible via port forwarding without NAT</p>
+</body>
+</html>
+EOF
+      
+      # Сохранение правил
+      iptables-save > /etc/sysconfig/iptables
+    SHELL
+  end
+end
