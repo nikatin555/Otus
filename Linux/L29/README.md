@@ -355,3 +355,353 @@ ssh otus@10.0.0.114
 6. **Автоматическая установка**: Настроена через cloud-init config
 
 Примечание: Vagrant up для pxeclient завершится с ошибкой из-за таймаута PXE загрузки - это ожидаемое поведение. После установки нужно вручную изменить настройки VM в VirtualBox для загрузки с диска.
+
+## Задания со звёздочкой: Настроить автоматическую загрузку по сети дистрибутива Ubuntu 24 c использованием UEFI
+
+Для настройки автоматической загрузки по сети Ubuntu 24 с использованием UEFI нужно изменить конфигурацию:
+
+## 1. Обновляем конфигурацию dnsmasq для UEFI
+
+На **pxeserver** отредактирем `/etc/dnsmasq.d/pxe.conf`:
+
+```bash
+sudo nano /etc/dnsmasq.d/pxe.conf
+```
+
+```ini
+interface=eth1
+bind-interfaces
+dhcp-range=10.0.0.100,10.0.0.120
+
+# UEFI загрузка
+dhcp-match=set:efi-x86_64,option:client-arch,7
+dhcp-match=set:efi-x86_64,option:client-arch,9
+dhcp-boot=tag:efi-x86_64,bootx64.efi
+
+# Legacy BIOS загрузка (на всякий случай)
+dhcp-boot=pxelinux.0
+
+enable-tftp
+tftp-root=/srv/tftp/amd64
+```
+
+## 2. Настраиваем GRUB для UEFI
+
+Отредактируем файл GRUB конфигурации:
+
+```bash
+sudo nano /srv/tftp/amd64/grub/grub.cfg
+```
+
+```grub
+set timeout=5
+set default=0
+
+menuentry "Ubuntu 24.04 UEFI Autoinstall" {
+    linux /linux ip=dhcp url=http://10.0.0.20/srv/images/resolute-live-server-amd64.iso autoinstall ds=nocloud-net;s=http://10.0.0.20/srv/ks/
+    initrd /initrd
+}
+
+menuentry "Ubuntu 24.04 UEFI Manual Install" {
+    linux /linux ip=dhcp url=http://10.0.0.20/srv/images/resolute-live-server-amd64.iso
+    initrd /initrd
+}
+```
+
+## 3. Настраиваем pxeclient для UEFI загрузки
+
+Изменим `Vagrantfile` для pxeclient:
+
+```ruby
+config.vm.define "pxeclient" do |pxeclient|
+  pxeclient.vm.box = "bento/ubuntu-24.04"
+  pxeclient.vm.host_name = 'pxeclient'
+  
+  pxeclient.vm.network :private_network,
+    virtualbox__intnet: 'pxenet',
+    auto_config: false
+  
+  pxeclient.vm.provider :virtualbox do |vb|
+    vb.memory = "4096"
+    vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+    vb.customize [
+      'modifyvm', :id,
+      '--nic1', 'intnet',
+      '--intnet1', 'pxenet',
+      '--nic2', 'nat',
+      '--firmware', 'efi',
+      '--boot1', 'net',
+      '--boot2', 'disk',
+      '--boot3', 'none'
+    ]
+  end
+end
+```
+
+## 4. Обновляем Ansible provision.yml
+
+Добавим в `provision.yml` настройку GRUB для UEFI:
+
+```yaml
+---
+- name: Configure PXE Server
+  hosts: pxeserver
+  become: yes
+  tasks:
+    - name: Stop and disable ufw
+      systemd:
+        name: ufw
+        state: stopped
+        enabled: no
+
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install required packages
+      apt:
+        name:
+          - dnsmasq
+          - apache2
+          - wget
+        state: present
+
+    - name: Create dnsmasq PXE configuration for UEFI
+      copy:
+        content: |
+          interface=eth1
+          bind-interfaces
+          dhcp-range=10.0.0.100,10.0.0.120
+
+          # UEFI загрузка
+          dhcp-match=set:efi-x86_64,option:client-arch,7
+          dhcp-match=set:efi-x86_64,option:client-arch,9
+          dhcp-boot=tag:efi-x86_64,bootx64.efi
+
+          # Legacy BIOS загрузка
+          dhcp-boot=pxelinux.0
+
+          enable-tftp
+          tftp-root=/srv/tftp/amd64
+        dest: /etc/dnsmasq.d/pxe.conf
+
+    - name: Create directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - /srv/tftp
+        - /srv/images
+        - /srv/ks
+
+    - name: Download Ubuntu 24.04 netboot files with retry
+      command: >
+        wget --tries=3 --timeout=30
+        http://cdimage.ubuntu.com/ubuntu-server/daily-live/current/resolute-netboot-amd64.tar.gz
+        -O /tmp/resolute-netboot-amd64.tar.gz
+      args:
+        creates: /tmp/resolute-netboot-amd64.tar.gz
+      register: download_netboot
+      retries: 3
+      delay: 10
+      until: download_netboot is succeeded
+
+    - name: Extract netboot files
+      unarchive:
+        src: /tmp/resolute-netboot-amd64.tar.gz
+        dest: /srv/tftp
+        remote_src: yes
+        creates: /srv/tftp/amd64
+
+    - name: Download Ubuntu 24.04 ISO with retry
+      command: >
+        wget --tries=3 --timeout=60
+        http://cdimage.ubuntu.com/ubuntu-server/daily-live/current/resolute-live-server-amd64.iso
+        -O /srv/images/resolute-live-server-amd64.iso
+      args:
+        creates: /srv/images/resolute-live-server-amd64.iso
+      register: download_iso
+      retries: 3
+      delay: 10
+      until: download_iso is succeeded
+
+    - name: Configure GRUB for UEFI
+      copy:
+        content: |
+          set timeout=5
+          set default=0
+
+          menuentry "Ubuntu 24.04 UEFI Autoinstall" {
+              linux /linux ip=dhcp url=http://10.0.0.20/srv/images/resolute-live-server-amd64.iso autoinstall ds=nocloud-net;s=http://10.0.0.20/srv/ks/
+              initrd /initrd
+          }
+
+          menuentry "Ubuntu 24.04 UEFI Manual Install" {
+              linux /linux ip=dhcp url=http://10.0.0.20/srv/images/resolute-live-server-amd64.iso
+              initrd /initrd
+          }
+        dest: /srv/tftp/amd64/grub/grub.cfg
+
+    - name: Configure PXELinux for Legacy BIOS
+      copy:
+        content: |
+          DEFAULT install
+          LABEL install
+          KERNEL linux
+          INITRD initrd
+          APPEND root=/dev/ram0 ramdisk_size=3000000 ip=dhcp iso-url=http://10.0.0.20/srv/images/resolute-live-server-amd64.iso autoinstall ds=nocloud-net;s=http://10.0.0.20/srv/ks/
+        dest: /srv/tftp/amd64/pxelinux.cfg/default
+
+    - name: Set proper permissions for TFTP files
+      file:
+        path: "{{ item }}"
+        mode: '0755'
+      loop:
+        - /srv/tftp/amd64/pxelinux.0
+        - /srv/tftp/amd64/bootx64.efi
+        - /srv/tftp/amd64/grubx64.efi
+
+    - name: Set permissions for other TFTP files
+      file:
+        path: /srv/tftp/amd64/
+        mode: '0644'
+        recurse: yes
+
+    - name: Configure Apache virtual host
+      copy:
+        content: |
+          <VirtualHost 10.0.0.20:80>
+            DocumentRoot /
+            <Directory /srv/ks>
+              Options Indexes MultiViews
+              AllowOverride All
+              Require all granted
+            </Directory>
+            <Directory /srv/images>
+              Options Indexes MultiViews
+              AllowOverride All
+              Require all granted
+            </Directory>
+          </VirtualHost>
+        dest: /etc/apache2/sites-available/ks-server.conf
+
+    - name: Enable Apache site
+      command: a2ensite ks-server.conf
+
+    - name: Disable default Apache site
+      command: a2dissite 000-default.conf
+
+    - name: Create cloud-init user-data with simple password
+      copy:
+        content: |
+          #cloud-config
+          autoinstall:
+            apt:
+              disable_components: []
+              geoip: true
+              preserve_sources_list: false
+              primary:
+                - arches:
+                    - amd64
+                    - i386
+                  uri: http://us.archive.ubuntu.com/ubuntu
+                - arches:
+                    - default
+                  uri: http://ports.ubuntu.com/ubuntu-ports
+            drivers:
+              install: false
+            identity:
+              hostname: linux
+              password: "123"
+              realname: otus
+              username: otus
+            kernel:
+              package: linux-generic
+            keyboard:
+              layout: us
+              toggle: null
+              variant: ''
+            locale: en_US.UTF-8
+            network:
+              ethernets:
+                enp0s3:
+                  dhcp4: true
+                enp0s8:
+                  dhcp4: true
+              version: 2
+            ssh:
+              allow-pw: true
+              authorized-keys: []
+            install-server: true
+            updates: security
+        dest: /srv/ks/user-data
+
+    - name: Create empty meta-data file
+      file:
+        path: /srv/ks/meta-data
+        state: touch
+
+    - name: Restart services
+      systemd:
+        name: "{{ item }}"
+        state: restarted
+        enabled: yes
+      loop:
+        - dnsmasq
+        - apache2
+
+    - name: Clean up temporary files
+      file:
+        path: /tmp/resolute-netboot-amd64.tar.gz
+        state: absent
+```
+
+## 5. Перезапускаем службы
+
+```bash
+sudo systemctl restart dnsmasq
+sudo systemctl restart apache2
+```
+
+## 6. Пересоздаем pxeclient с UEFI
+
+```bash
+vagrant destroy pxeclient
+vagrant up pxeclient
+```
+
+## 7. Проверка UEFI загрузки
+
+При загрузке pxeclient в VirtualBox появится:
+- **GRUB меню** вместо PXELinux
+- **UEFI интерфейс** загрузки
+- Автоматическую установку через UEFI
+
+## 8. Дополнительные настройки для полной автоматизации
+
+Если нужно полностью автоматизировать UEFI загрузку без меню:
+
+```bash
+sudo nano /srv/tftp/amd64/grub/grub.cfg
+```
+
+```grub
+set timeout=1
+set default=0
+
+menuentry "Auto Ubuntu UEFI" {
+    linux /linux quiet ip=dhcp url=http://10.0.0.20/srv/images/resolute-live-server-amd64.iso autoinstall ds=nocloud-net;s=http://10.0.0.20/srv/ks/ ---
+    initrd /initrd
+}
+```
+
+## Ключевые отличия UEFI от Legacy:
+
+1. **firmware**: `--firmware efi` в VirtualBox
+2. **Загрузчик**: `bootx64.efi` вместо `pxelinux.0`
+3. **Конфигурация**: GRUB вместо PXELinux
+4. **Файлы**: Используются `.efi` файлы
+
+После настройки pxeclient будет загружаться по сети через UEFI и автоматически устанавливать Ubuntu 24.04.

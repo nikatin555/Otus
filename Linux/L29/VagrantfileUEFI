@@ -1,0 +1,23 @@
+config.vm.define "pxeclient" do |pxeclient|
+  pxeclient.vm.box = "bento/ubuntu-24.04"
+  pxeclient.vm.host_name = 'pxeclient'
+  
+  pxeclient.vm.network :private_network,
+    virtualbox__intnet: 'pxenet',
+    auto_config: false
+  
+  pxeclient.vm.provider :virtualbox do |vb|
+    vb.memory = "4096"
+    vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+    vb.customize [
+      'modifyvm', :id,
+      '--nic1', 'intnet',
+      '--intnet1', 'pxenet',
+      '--nic2', 'nat',
+      '--firmware', 'efi',           # Включаем UEFI
+      '--boot1', 'net',
+      '--boot2', 'disk',
+      '--boot3', 'none'
+    ]
+  end
+end
