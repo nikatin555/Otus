@@ -1,23 +1,54 @@
-config.vm.define "pxeclient" do |pxeclient|
-  pxeclient.vm.box = "bento/ubuntu-24.04"
-  pxeclient.vm.host_name = 'pxeclient'
-  
-  pxeclient.vm.network :private_network,
-    virtualbox__intnet: 'pxenet',
-    auto_config: false
-  
-  pxeclient.vm.provider :virtualbox do |vb|
-    vb.memory = "4096"
-    vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
-    vb.customize [
-      'modifyvm', :id,
-      '--nic1', 'intnet',
-      '--intnet1', 'pxenet',
-      '--nic2', 'nat',
-      '--firmware', 'efi',           # Включаем UEFI
-      '--boot1', 'net',
-      '--boot2', 'disk',
-      '--boot3', 'none'
-    ]
+ENV['VAGRANT_SERVER_URL'] = 'https://vagrant.elab.pro'
+
+Vagrant.configure("2") do |config|
+  config.vm.define "pxeserver" do |server|
+    server.vm.box = "bento/ubuntu-24.04"
+    server.vm.host_name = 'pxeserver'
+    server.vm.network "forwarded_port", guest: 80, host: 8080
+    server.vm.network :private_network,
+      ip: "10.0.0.20",
+      virtualbox__intnet: 'pxenet'
+    server.vm.network :private_network, ip: "192.168.50.10", adapter: 3
+    
+    server.vm.provider "virtualbox" do |vb|
+      vb.memory = "1024"
+      vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+    end
+    
+    server.vm.provision "ansible" do |ansible|
+      ansible.playbook = "ansible/provision.yml"
+      ansible.inventory_path = "ansible/hosts"
+      ansible.host_key_checking = "false"
+      ansible.limit = "all"
+      ansible.verbose = "v"
+    end
+  end
+
+  config.vm.define "pxeclient" do |pxeclient|
+    pxeclient.vm.box = "bento/ubuntu-24.04"
+    pxeclient.vm.host_name = 'pxeclient'
+    
+    # Только internal network для PXE
+    pxeclient.vm.network :private_network,
+      virtualbox__intnet: 'pxenet',
+      auto_config: false
+    
+    pxeclient.vm.provider :virtualbox do |vb|
+      vb.memory = "4096"
+      vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+      vb.customize [
+        'modifyvm', :id,
+        '--nic1', 'intnet',           # Internal network для PXE
+        '--intnet1', 'pxenet',
+        '--nic2', 'nat',              # NAT для доступа
+        '--firmware', 'efi',          # Включаем UEFI
+        '--graphicscontroller', 'vmsvga',  # Совместимый видео контроллер для UEFI
+        '--vram', '128',              # Видеопамять для UEFI
+        '--boot1', 'net',             # Первая загрузка - сеть
+        '--boot2', 'disk',            # Вторая загрузка - диск
+        '--boot3', 'none',            # Отключаем остальные
+        '--boot4', 'none'
+      ]
+    end
   end
 end
