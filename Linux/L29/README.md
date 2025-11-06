@@ -362,7 +362,7 @@ ssh otus@10.0.0.114
 
 ## 1. Обновляем конфигурацию dnsmasq для UEFI
 
-На **pxeserver** отредактирем `/etc/dnsmasq.d/pxe.conf`:
+На **pxeserver** отредактируем `/etc/dnsmasq.d/pxe.conf`:
 
 ```bash
 sudo nano /etc/dnsmasq.d/pxe.conf
