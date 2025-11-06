@@ -573,17 +573,13 @@ else
 fi
 ```
 
-## Как использовать:
-
-1. **Сохраните все файлы** в одной директории
-2. **Сделайте deploy.sh исполняемым**:
-   ```bash
-   chmod +x deploy.sh
-   ```
-3. **Запустите развертывание**:
-   ```bash
-   ./deploy.sh
-   ```
+## Запуск развертывания
+```bash
+#Сделаю deploy.sh исполняемым
+chmod +x deploy.sh
+#Запуск
+./deploy.sh
+```
 
 ## Проблемы в ходе задания:
 1)  порт 8080 на inetRouter2 не слушает соединения:
@@ -676,6 +672,12 @@ echo "2. Test SSH: vagrant ssh centralRouter -c 'ssh vagrant@192.168.0.10 hostna
 echo "3. Test port 8080: curl http://localhost:8080"
 echo "4. Test port 8081: curl http://localhost:8081"
 ```
+```bash
+#Сделаю setup-nginx-on-inetrouter2.sh и fix-everything.sh  исполняемыми
+chmod +x setup-nginx-on-inetrouter2.sh fix-everything.sh
+./setup-nginx-on-inetrouter2.sh
+./fix-everything.sh
+```
 
 ## Проверка работы:
 
@@ -716,9 +718,10 @@ echo "✅ SSH between routers: Working"
 echo "✅ Knocking port: Implemented"
 echo ""
 echo "All tasks completed successfully!"
-
-
+```
+```bash
 chmod +x test-everything.sh
+./test-everything.sh
 ```
 ![alt text](image.png)
 
