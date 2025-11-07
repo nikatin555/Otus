@@ -366,7 +366,7 @@ line vty
             var: connectivity_test.stdout
 ```
 
-### 10. Упрощенная настройка OSPF ansible/simple_ospf_setup.yml
+### 10. Настройка OSPF ansible/simple_ospf_setup.yml
 
 ```yaml
 ---
