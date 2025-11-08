@@ -1,0 +1,133 @@
+---
+- name: Configure network infrastructure
+  hosts: all
+  become: yes
+  gather_facts: yes
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install necessary packages
+      apt:
+        name:
+          - traceroute
+          - net-tools
+          - iptables-persistent
+        state: present
+
+- name: Configure routers
+  hosts: routers
+  become: yes
+  tasks:
+    - name: Enable IP forwarding
+      sysctl:
+        name: net.ipv4.ip_forward
+        value: '1'
+        state: present
+        reload: yes
+
+    - name: Disable ufw
+      systemd:
+        name: ufw
+        state: stopped
+        enabled: no
+
+- name: Configure NAT on inetRouter
+  hosts: inetRouter
+  become: yes
+  tasks:
+    - name: Set up NAT on inetRouter
+      template:
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+        owner: root
+        group: root
+        mode: "{{ item.mode }}"
+      with_items:
+        - { src: "iptables_rules.ipv4", dest: "/etc/iptables_rules.ipv4", mode: "0644" }
+        - { src: "iptables_restore", dest: "/etc/network/if-pre-up.d/iptables", mode: "0755" }
+
+    - name: Configure iptables for NAT and forwarding
+      shell: |
+        # Flush all rules
+        iptables -F
+        iptables -t nat -F
+        iptables -X
+        iptables -t nat -X
+
+        # Set default policies
+        iptables -P INPUT ACCEPT
+        iptables -P FORWARD ACCEPT
+        iptables -P OUTPUT ACCEPT
+
+        # Configure NAT
+        iptables -t nat -A POSTROUTING ! -d 192.168.0.0/16 -o enp0s3 -j MASQUERADE
+
+        # Allow forwarding between interfaces
+        iptables -A FORWARD -i enp0s8 -o enp0s3 -j ACCEPT
+        iptables -A FORWARD -i enp0s3 -o enp0s8 -m state --state ESTABLISHED,RELATED -j ACCEPT
+
+        # Save rules
+        iptables-save > /etc/iptables_rules.ipv4
+
+- name: Configure persistent static routes via netplan
+  hosts: all
+  become: yes
+  tasks:
+    - name: Add persistent netplan configuration
+      template:
+        src: "50-vagrant_{{ ansible_hostname }}.yaml.j2"
+        dest: /etc/netplan/50-vagrant.yaml
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Apply persistent netplan configuration
+      shell: netplan apply
+      ignore_errors: yes
+
+- name: Remove conflicting default routes
+  hosts: all:!inetRouter
+  become: yes
+  tasks:
+    - name: Remove DHCP default routes
+      shell: |
+        ip route del default via 10.0.2.2 dev enp0s3 2>/dev/null || true
+        ip route del default dev enp0s3 2>/dev/null || true
+      ignore_errors: yes
+
+- name: Final verification and testing
+  hosts: all
+  become: yes
+  tasks:
+    - name: Show routing table
+      command: ip route
+      register: ip_route
+
+    - name: Display routing table
+      debug:
+        var: ip_route.stdout
+
+    - name: Test internet connectivity from servers
+      shell: traceroute -n 8.8.8.8 -m 6
+      when: "'servers' in group_names"
+      register: server_traceroute
+      ignore_errors: yes
+
+    - name: Display server traceroute results
+      debug:
+        var: server_traceroute.stdout
+      when: "'servers' in group_names"
+
+    - name: Test ping to internet from servers
+      shell: ping -c 3 8.8.8.8
+      when: "'servers' in group_names"
+      register: server_ping
+      ignore_errors: yes
+
+    - name: Display server ping results
+      debug:
+        var: server_ping.stdout
+      when: "'servers' in group_names"
