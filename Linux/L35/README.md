@@ -606,23 +606,6 @@ vagrant ssh client -c "ping -c 3 10.10.10.1"
 ![alt text](image-13.png)
 
 
-# Проверяем конфигурацию
-vagrant ssh ocserv -c "sudo cat /etc/ocserv/ocserv.conf | grep socket-file"
-
-# Запускаем службу
-vagrant ssh ocserv -c "sudo systemctl start ocserv"
-
-# Проверяем статус
-vagrant ssh ocserv -c "sudo systemctl status ocserv"
-
-# Проверяем порты
-vagrant ssh ocserv -c "sudo netstat -tlnp | grep 443"
-
-# Проверяем сокет
-vagrant ssh ocserv -c "sudo ls -la /var/run/ocserv-socket*"
-```
-![alt text](image-14.png)
-
 ## Тестирование
 
 ### 1. Проверка TUN/TAP VPN между server и client
