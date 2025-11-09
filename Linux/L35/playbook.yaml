@@ -1,0 +1,386 @@
+---
+- name: Wait for all hosts to be available
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Wait for SSH to be available
+      wait_for_connection:
+        timeout: 120
+
+- name: Configure TUN/TAP VPN infrastructure
+  hosts: all
+  become: yes
+  gather_facts: yes
+  tasks:
+    - name: Install common packages
+      apt:
+        name:
+          - openvpn
+          - iperf3
+        state: present
+        update_cache: yes
+
+- name: Configure TUN/TAP VPN Server
+  hosts: servers
+  become: yes
+  tasks:
+    - name: Create static key
+      command: openvpn --genkey secret /etc/openvpn/static.key
+      args:
+        creates: /etc/openvpn/static.key
+
+    - name: Create TAP mode server config
+      copy:
+        content: |
+          dev tap
+          ifconfig 10.10.10.1 255.255.255.0
+          topology subnet
+          secret /etc/openvpn/static.key
+          comp-lzo
+          status /var/log/openvpn-status.log
+          log /var/log/openvpn.log
+          verb 3
+        dest: /etc/openvpn/server-tap.conf
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: Create TUN mode server config
+      copy:
+        content: |
+          dev tun
+          ifconfig 10.10.10.1 255.255.255.0
+          topology subnet
+          secret /etc/openvpn/static.key
+          comp-lzo
+          status /var/log/openvpn-status.log
+          log /var/log/openvpn.log
+          verb 3
+        dest: /etc/openvpn/server-tun.conf
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: Create OpenVPN systemd service
+      copy:
+        content: |
+          [Unit]
+          Description=OpenVPN Tunneling Application On %I
+          After=network.target
+
+          [Service]
+          Type=notify
+          PrivateTmp=true
+          ExecStart=/usr/sbin/openvpn --cd /etc/openvpn/ --config %i.conf
+
+          [Install]
+          WantedBy=multi-user.target
+        dest: /etc/systemd/system/openvpn@.service
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: Start TAP mode OpenVPN
+      systemd:
+        name: openvpn@server-tap
+        state: started
+        enabled: yes
+        daemon_reload: yes
+
+- name: Configure TUN/TAP VPN Client
+  hosts: clients
+  become: yes
+  tasks:
+    - name: Ensure static key exists on server
+      stat:
+        path: /etc/openvpn/static.key
+      register: key_check
+      delegate_to: server
+
+    - name: Create static key locally if missing (fallback)
+      command: openvpn --genkey secret /etc/openvpn/static.key
+      when: not key_check.stat.exists
+      delegate_to: server
+
+    - name: Fetch static key from server using slurp
+      slurp:
+        src: /etc/openvpn/static.key
+      register: key_content
+      delegate_to: server
+
+    - name: Save static key on client
+      copy:
+        content: "{{ key_content.content | b64decode }}"
+        dest: /etc/openvpn/static.key
+        owner: root
+        group: root
+        mode: 0600
+
+    - name: Create TAP mode client config
+      copy:
+        content: |
+          dev tap
+          remote 192.168.56.10
+          ifconfig 10.10.10.2 255.255.255.0
+          topology subnet
+          route 192.168.56.0 255.255.255.0
+          secret /etc/openvpn/static.key
+          comp-lzo
+          status /var/log/openvpn-status.log
+          log /var/log/openvpn.log
+          verb 3
+        dest: /etc/openvpn/server-tap.conf
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: Create TUN mode client config
+      copy:
+        content: |
+          dev tun
+          remote 192.168.56.10
+          ifconfig 10.10.10.2 255.255.255.0
+          topology subnet
+          route 192.168.56.0 255.255.255.0
+          secret /etc/openvpn/static.key
+          comp-lzo
+          status /var/log/openvpn-status.log
+          log /var/log/openvpn.log
+          verb 3
+        dest: /etc/openvpn/server-tun.conf
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: Create OpenVPN systemd service
+      copy:
+        content: |
+          [Unit]
+          Description=OpenVPN Tunneling Application On %I
+          After=network.target
+
+          [Service]
+          Type=notify
+          PrivateTmp=true
+          ExecStart=/usr/sbin/openvpn --cd /etc/openvpn/ --config %i.conf
+
+          [Install]
+          WantedBy=multi-user.target
+        dest: /etc/systemd/system/openvpn@.service
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: Start TAP mode OpenVPN on client
+      systemd:
+        name: openvpn@server-tap
+        state: started
+        enabled: yes
+        daemon_reload: yes
+
+- name: Configure OpenVPN RAS Server
+  hosts: rasvpn_servers
+  become: yes
+  tasks:
+    - name: Install easy-rsa
+      apt:
+        name: easy-rsa
+        state: present
+
+    - name: Create OpenVPN directory
+      file:
+        path: /etc/openvpn
+        state: directory
+        mode: 0755
+
+    - name: Set Easy-RSA variables for non-interactive mode
+      lineinfile:
+        path: /etc/openvpn/pki/vars
+        regexp: "^{{ item.key }}="
+        line: "{{ item.key }}={{ item.value }}"
+        create: yes
+      with_items:
+        - { key: "set_var EASYRSA_REQ_COUNTRY", value: "\"RU\"" }
+        - { key: "set_var EASYRSA_REQ_PROVINCE", value: "\"Moscow\"" }
+        - { key: "set_var EASYRSA_REQ_CITY", value: "\"Moscow\"" }
+        - { key: "set_var EASYRSA_REQ_ORG", value: "\"Company\"" }
+        - { key: "set_var EASYRSA_REQ_EMAIL", value: "\"admin@company.com\"" }
+        - { key: "set_var EASYRSA_REQ_OU", value: "\"IT\"" }
+        - { key: "set_var EASYRSA_BATCH", value: "\"yes\"" }
+
+    - name: Initialize PKI
+      command: /usr/share/easy-rsa/easyrsa init-pki
+      args:
+        chdir: /etc/openvpn
+      environment:
+        EASYRSA_BATCH: "1"
+
+    - name: Generate CA
+      command: /usr/share/easy-rsa/easyrsa build-ca nopass
+      args:
+        chdir: /etc/openvpn
+      environment:
+        EASYRSA_BATCH: "1"
+
+    - name: Generate server certificate
+      command: /usr/share/easy-rsa/easyrsa build-server-full server nopass
+      args:
+        chdir: /etc/openvpn
+      environment:
+        EASYRSA_BATCH: "1"
+
+    - name: Generate client certificate
+      command: /usr/share/easy-rsa/easyrsa build-client-full client nopass
+      args:
+        chdir: /etc/openvpn
+      environment:
+        EASYRSA_BATCH: "1"
+
+    - name: Generate Diffie-Hellman parameters
+      command: /usr/share/easy-rsa/easyrsa gen-dh
+      args:
+        chdir: /etc/openvpn
+      environment:
+        EASYRSA_BATCH: "1"
+
+    - name: Create client config directory
+      file:
+        path: /etc/openvpn/client
+        state: directory
+        mode: 0755
+
+    - name: Create client specific configuration
+      copy:
+        content: |
+          iroute 10.10.10.0 255.255.255.0
+        dest: /etc/openvpn/client/client
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: Create server configuration
+      copy:
+        content: |
+          port 1207
+          proto udp
+          dev tun
+          ca /etc/openvpn/pki/ca.crt
+          cert /etc/openvpn/pki/issued/server.crt
+          key /etc/openvpn/pki/private/server.key
+          dh /etc/openvpn/pki/dh.pem
+          server 10.10.10.0 255.255.255.0
+          ifconfig-pool-persist ipp.txt
+          client-to-client
+          client-config-dir /etc/openvpn/client
+          keepalive 10 120
+          comp-lzo
+          persist-key
+          persist-tun
+          status /var/log/openvpn-status.log
+          log /var/log/openvpn.log
+          verb 3
+        dest: /etc/openvpn/server.conf
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: Enable IP forwarding
+      sysctl:
+        name: net.ipv4.ip_forward
+        value: '1'
+        state: present
+        reload: yes
+
+    - name: Start OpenVPN server
+      systemd:
+        name: openvpn@server
+        state: started
+        enabled: yes
+        daemon_reload: yes
+
+    - name: Create client config directory on rasvpn
+      file:
+        path: /etc/openvpn/client-config
+        state: directory
+        mode: 0755
+
+    - name: Create client configuration file
+      copy:
+        content: |
+          dev tun
+          proto udp
+          remote 192.168.56.30 1207
+          client
+          resolv-retry infinite
+          remote-cert-tls server
+          ca ca.crt
+          cert client.crt
+          key client.key
+          route 192.168.56.0 255.255.255.0
+          persist-key
+          persist-tun
+          comp-lzo
+          verb 3
+        dest: /etc/openvpn/client-config/client.ovpn
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: Copy CA certificate to client config
+      copy:
+        src: /etc/openvpn/pki/ca.crt
+        dest: /etc/openvpn/client-config/ca.crt
+        remote_src: yes
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: Copy client certificate to client config
+      copy:
+        src: /etc/openvpn/pki/issued/client.crt
+        dest: /etc/openvpn/client-config/client.crt
+        remote_src: yes
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: Copy client key to client config
+      copy:
+        src: /etc/openvpn/pki/private/client.key
+        dest: /etc/openvpn/client-config/client.key
+        remote_src: yes
+        owner: root
+        group: root
+        mode: 0600
+
+    - name: Copy client config files directly to host folder
+      copy:
+        src: "{{ item.src }}"
+        dest: "/etc/l351/vpn-client/{{ item.dest }}"
+        remote_src: yes
+        owner: root
+        group: root
+        mode: "{{ item.mode }}"
+      with_items:
+        - { src: '/etc/openvpn/client-config/client.ovpn', dest: 'client.ovpn', mode: '0644' }
+        - { src: '/etc/openvpn/client-config/ca.crt', dest: 'ca.crt', mode: '0644' }
+        - { src: '/etc/openvpn/client-config/client.crt', dest: 'client.crt', mode: '0644' }
+        - { src: '/etc/openvpn/client-config/client.key', dest: 'client.key', mode: '0600' }
+
+- name: Final service restart to ensure connectivity
+  hosts: all
+  become: yes
+  tasks:
+    - name: Restart OpenVPN services
+      systemd:
+        name: "{{ item }}"
+        state: restarted
+      loop:
+        - openvpn@server-tap
+        - openvpn@server-tun
+        - openvpn@server
+      ignore_errors: yes
+
+    - name: Wait for services to stabilize
+      pause:
+        seconds: 10

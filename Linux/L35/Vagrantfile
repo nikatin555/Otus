@@ -1,0 +1,50 @@
+ENV['VAGRANT_SERVER_URL'] = 'https://vagrant.elab.pro'
+
+Vagrant.configure("2") do |config|
+  config.vm.box = "ubuntu/22.04"
+
+  # Общие настройки для всех VM
+  config.vm.provision "shell", inline: <<-SHELL
+    # Создаем пользователя nik с паролем 123
+    useradd -m -s /bin/bash nik 2>/dev/null || true
+    echo "nik:123" | chpasswd
+    echo "nik ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/nik
+
+    # Настраиваем SSH доступ для Ansible с парольной аутентификацией
+    sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/g' /etc/ssh/sshd_config
+    sed -i 's/PasswordAuthentication no/#PasswordAuthentication no/g' /etc/ssh/sshd_config
+    systemctl restart ssh
+
+    # Обновляем пакеты и устанавливаем python3
+    apt-get update -y
+    DEBIAN_FRONTEND=noninteractive apt-get install -y python3 sudo openssh-server
+  SHELL
+
+  config.vm.define "server" do |server|
+    server.vm.hostname = "server.loc"
+    server.vm.network "private_network", ip: "192.168.56.10"
+    server.vm.provider "virtualbox" do |vb|
+      vb.memory = "3096"
+      vb.cpus = 1
+    end
+  end
+
+  config.vm.define "client" do |client|
+    client.vm.hostname = "client.loc"
+    client.vm.network "private_network", ip: "192.168.56.20"
+    client.vm.provider "virtualbox" do |vb|
+      vb.memory = "3096"
+      vb.cpus = 1
+    end
+  end
+
+  config.vm.define "rasvpn" do |rasvpn|
+    rasvpn.vm.hostname = "rasvpn.loc"
+    rasvpn.vm.network "private_network", ip: "192.168.56.30"
+    rasvpn.vm.network "forwarded_port", guest: 1207, host: 1207, protocol: "udp"
+    rasvpn.vm.provider "virtualbox" do |vb|
+      vb.memory = "3096"
+      vb.cpus = 1
+    end
+  end
+end

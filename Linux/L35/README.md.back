@@ -1,0 +1,125 @@
+
+Наработки по заданию со *:
+
+Vagrantfile
+```
+ENV['VAGRANT_SERVER_URL'] = 'https://vagrant.elab.pro'
+
+Vagrant.configure("2") do |config|
+  config.vm.box = "ubuntu/22.04"
+
+  # Общие настройки для всех VM
+  config.vm.provision "shell", inline: <<-SHELL
+    # Создаем пользователя nik с паролем 123
+    useradd -m -s /bin/bash nik 2>/dev/null || true
+    echo "nik:123" | chpasswd
+    echo "nik ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/nik
+
+    # Настраиваем SSH доступ для Ansible
+    mkdir -p /home/nik/.ssh
+    cp /home/vagrant/.ssh/authorized_keys /home/nik/.ssh/ 2>/dev/null || true
+    chown -R nik:nik /home/nik/.ssh
+    chmod 700 /home/nik/.ssh
+    chmod 600 /home/nik/.ssh/authorized_keys
+
+    # Включаем парольную аутентификацию SSH
+    sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/g' /etc/ssh/sshd_config
+    sed -i 's/PasswordAuthentication no/#PasswordAuthentication no/g' /etc/ssh/sshd_config
+    systemctl restart ssh
+
+    # Обновляем пакеты и устанавливаем python3
+    apt-get update -y
+    DEBIAN_FRONTEND=noninteractive apt-get install -y python3 sudo openssh-server
+  SHELL
+
+  # Новая VM для ocserv
+  config.vm.define "ocserv" do |ocserv|
+    ocserv.vm.hostname = "ocserv.loc"
+    ocserv.vm.network "private_network", ip: "192.168.56.40"
+    ocserv.vm.network "forwarded_port", guest: 443, host: 8443, protocol: "tcp"
+    ocserv.vm.network "forwarded_port", guest: 443, host: 8443, protocol: "udp"
+    ocserv.vm.provider "virtualbox" do |vb|
+      vb.memory = "1024"
+      vb.cpus = 1
+    end
+  end
+end
+```
+cat inventory.ini
+[ocserv_servers]
+ocserv ansible_host=192.168.56.40
+
+[all_vms:children]
+ocserv_servers
+
+[all:vars]
+ansible_user=nik
+ansible_ssh_pass=123
+ansible_become_pass=123
+ansible_connection=ssh
+ansible_python_interpreter=/usr/bin/python3
+ansible_ssh_common_args='-o StrictHostKeyChecking=no'
+
+
+
+cat .ansible.cfg
+[defaults]
+host_key_checking = False
+inventory = /etc/l352/inventory.ini
+remote_user = nik
+private_key_file = ~/.vagrant.d/insecure_private_key
+roles_path = /etc/l352/roles
+[privilege_escalation]
+become = True
+become_method = sudo
+become_user = root
+become_ask_pass = False
+
+
+3) Не создавался сокет по 3му заданию:
+```bash
+# Останавливаем ocserv
+vagrant ssh ocserv -c "sudo systemctl stop ocserv"
+
+# Создаем правильную конфигурацию с socket-file
+vagrant ssh ocserv -c "sudo tee /etc/ocserv/ocserv.conf > /dev/null << 'EOF'
+auth = \"plain[/etc/ocserv/ocpasswd]\"
+tcp-port = 443
+udp-port = 443
+socket-file = /var/run/ocserv-socket
+run-as-user = nobody
+run-as-group = nogroup
+server-cert = /etc/ssl/certs/server-cert.pem
+server-key = /etc/ssl/private/server-key.pem
+ipv4-network = 10.20.30.0
+ipv4-netmask = 255.255.255.0
+dns = 8.8.8.8
+dns = 8.8.4.4
+route = 192.168.56.0/255.255.255.0
+isolate-workers = false
+server-stats-reset-time = 604800
+max-clients = 16
+max-same-clients = 2
+keepalive = 32400
+dpd = 90
+mobile-dpd = 1800
+switch-to-tcp-timeout = 25
+try-mtu-discovery = false
+cert-user-oid = 0.9.2342.19200300.100.1.1
+auth-timeout = 240
+min-reauth-time = 300
+max-ban-score = 50
+ban-reset-time = 300
+cookie-timeout = 300
+deny-roaming = false
+rekey-time = 172800
+rekey-method = ssl
+use-occtl = true
+pid-file = /var/run/ocserv.pid
+device = vpns
+predictable-ips = true
+default-domain = vpn.local
+ping-leases = false
+cisco-client-compat = true
+dtls-legacy = true
+EOF"
