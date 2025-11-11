@@ -33,10 +33,6 @@ www - смотрит на обоих клиентов
 ## Структура проекта
 
 ```bash
-sudo mkdir -p /etc/l36/provisioning
-```
-
-```bash
  mkdir -p /etc/l36/provisioning/ && cd /etc/l36/ && touch Vagrantfile &&  cd provisioning/ && touch playbook.yml inventory.ini master-named.conf slave-named.conf named.dns.lab named.dns.lab.client named.newdns.lab   servers-resolv.conf.j2 client-resolv.conf named.zonetransfer.key rndc.conf client-motd
 
  tree
@@ -119,7 +115,7 @@ ansible_ssh_private_key_file=~/.vagrant.d/insecure_private_key
 ansible_ssh_common_args='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
 ```
 
-**Альтернативный способ,обойти проблему подключения Ansible к приватным адресам, - использовать vagrant inventory plugin, но мне он показался, менее надёжным:**
+**Альтернативный способ,обойти проблему подключения Ansible к приватным адресам - использовать vagrant inventory plugin, но мне он показался, менее надёжным:**
 ```bash
 ansible-galaxy collection install community.general
 ```
@@ -731,7 +727,7 @@ vagrant up
  ansible-playbook -i provisioning/vagrant_inventory.py provisioning/playbook.yml
 ```
 
-После развертывания проверьте работу Split-DNS:
+После развертывания проверим работу Split-DNS:
 
 На client:
 ```bash
@@ -759,14 +755,6 @@ ansible all -i provisioning/vagrant_inventory.py -a "getenforce" -u vagrant
 ![alt text](image-1.png)
 
 ![alt text](image-2.png)
-
-Данная конфигурация обеспечивает:
-- Создание структуры проекта в /etc/l36/
-- Добавление client2 в стенд
-- Настройку зон dns.lab и newdns.lab с требуемыми записями
-- Реализацию Split-DNS согласно требованиям
-- Автоматическую настройку через Ansible
-- Использование актуальных версий ПО для AlmaLinux 9
 
 ## Проверка результатов:
 
