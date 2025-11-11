@@ -1,0 +1,206 @@
+---
+- name: Configure DNS infrastructure
+  hosts: all
+  become: yes
+  gather_facts: yes
+  tasks:
+    - name: Install common packages
+      dnf:
+        name:
+          - bind
+          - bind-utils
+          - vim
+          - chrony
+          - policycoreutils-python-utils
+        state: latest
+        update_cache: yes
+
+    - name: Ensure chronyd is running and enabled
+      service:
+        name: chronyd
+        state: started
+        enabled: yes
+
+    - name: Copy zone transfer key
+      copy:
+        src: named.zonetransfer.key
+        dest: /etc/named.zonetransfer.key
+        owner: root
+        group: named
+        mode: 0644
+
+- name: Create user nik and configure SSH
+  hosts: all
+  become: yes
+  tasks:
+    - name: Create user nik
+      user:
+        name: nik
+        groups: wheel
+        append: yes
+        shell: /bin/bash
+        state: present
+
+    - name: Set password for user nik using chpasswd
+      shell: echo "nik:123!" | chpasswd
+      become: yes
+      changed_when: false
+
+    - name: Configure sudo for nik
+      copy:
+        content: "nik ALL=(ALL) NOPASSWD: ALL"
+        dest: /etc/sudoers.d/nik
+        mode: 0440
+
+    - name: Enable password authentication for SSH
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PasswordAuthentication'
+        line: 'PasswordAuthentication yes'
+        state: present
+
+    - name: Restart sshd
+      service:
+        name: sshd
+        state: restarted
+
+- name: Configure SELinux for DNS servers
+  hosts: ns
+  become: yes
+  tasks:
+    - name: Set SELinux context for named configuration
+      sefcontext:
+        target: '/etc/named(/.*)?'
+        setype: named_conf_t
+        state: present
+
+    - name: Set SELinux context for zone files
+      sefcontext:
+        target: '/var/named/slaves(/.*)?'
+        setype: named_zone_t
+        state: present
+
+    - name: Apply SELinux context changes
+      command: restorecon -R -v /etc/named /var/named/slaves
+
+    - name: Configure named to run with correct SELinux context
+      seboolean:
+        name: named_write_master_zones
+        state: yes
+        persistent: yes
+
+- name: Configure DNS master server
+  hosts: ns01
+  become: yes
+  tasks:
+    - name: Copy master named.conf
+      copy:
+        src: master-named.conf
+        dest: /etc/named.conf
+        owner: root
+        group: named
+        mode: 0640
+
+    - name: Copy zone files
+      copy:
+        src: "{{ item }}"
+        dest: /etc/named/
+        owner: root
+        group: named
+        mode: 0660
+      loop:
+        - named.dns.lab
+        - named.dns.lab.client
+        - named.newdns.lab
+
+    - name: Configure resolv.conf for ns01
+      template:
+        src: servers-resolv.conf.j2
+        dest: /etc/resolv.conf
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: Set /etc/named permissions
+      file:
+        path: /etc/named
+        owner: root
+        group: named
+        mode: 0670
+        state: directory
+
+    - name: Ensure named is running and enabled
+      service:
+        name: named
+        state: restarted
+        enabled: yes
+
+- name: Configure DNS slave server
+  hosts: ns02
+  become: yes
+  tasks:
+    - name: Copy slave named.conf
+      copy:
+        src: slave-named.conf
+        dest: /etc/named.conf
+        owner: root
+        group: named
+        mode: 0640
+
+    - name: Create slaves directory
+      file:
+        path: /var/named/slaves
+        state: directory
+        owner: named
+        group: named
+        mode: 0755
+
+    - name: Configure resolv.conf for ns02
+      template:
+        src: servers-resolv.conf.j2
+        dest: /etc/resolv.conf
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: Set /etc/named permissions
+      file:
+        path: /etc/named
+        owner: root
+        group: named
+        mode: 0670
+        state: directory
+
+    - name: Ensure named is running and enabled
+      service:
+        name: named
+        state: restarted
+        enabled: yes
+
+- name: Configure clients
+  hosts: clients
+  become: yes
+  tasks:
+    - name: Copy resolv.conf to clients
+      copy:
+        src: client-resolv.conf
+        dest: /etc/resolv.conf
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: Copy rndc config file
+      copy:
+        src: rndc.conf
+        dest: /home/nik/rndc.conf
+        owner: nik
+        group: nik
+        mode: 0644
+
+    - name: Copy motd to clients
+      copy:
+        src: client-motd
+        dest: /etc/motd
+        owner: root
+        group: root
+        mode: 0644
