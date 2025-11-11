@@ -591,7 +591,7 @@ ping 192.168.255.9
 
 ![alt text](image-14.png)
 
-Для удобстватестирования я подготовил скрипт `test-network.sh`:
+Для удобства тестирования я подготовил скрипт `test-network.sh`:
 ```bash
 #!/bin/bash
 
@@ -780,7 +780,7 @@ echo -e "${BLUE}=== Test Complete ===${NC}"
 ```
 ![alt text](image-2.png)
 
-![alt text](image-3.png)
+![alt text](image-15.png)
 
 ## Для улучшения надежности можно добавить в playbook.yml проверки:
 
