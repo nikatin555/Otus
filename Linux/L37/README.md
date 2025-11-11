@@ -30,7 +30,7 @@ testClient2 <-> testServer2
 ## Структура проекта
 
 ```bash
- mkdir -p /etc/l37/ansible/templates/ &&  cd /etc/l37 && touch Vagrantfile && cd ansible/ && touch inventory.ini provision.yml && touch inventory.ini playbook.yml && cd templates/ && touch ifcfg-bond0.j2  ifcfg-eth1 ifcfg-eth2 ifcfg-vlan1.j2 50-ubuntu-vlan.yaml.j2
+ mkdir -p /etc/l37/ansible/templates/ &&  cd /etc/l37 && touch Vagrantfile test-network.sh && cd ansible/ && touch inventory.ini provision.yml && touch inventory.ini playbook.yml && cd templates/ && touch ifcfg-bond0.j2  ifcfg-eth1 ifcfg-eth2 ifcfg-vlan1.j2 50-ubuntu-vlan.yaml.j2
 
  tree
 .
@@ -45,6 +45,7 @@ testClient2 <-> testServer2
 │   ├── ifcfg-vlan1.j2          # для VLAN на AlmaLinux (eth1)
 │   └── 50-ubuntu-vlan.yaml.j2  # для VLAN на Ubuntu (enp0s8)
 └── Vagrantfile
+└── test-network.sh             # Скрипт для тестирования
 ```
 ## 1. Vagrantfile
 
@@ -190,7 +191,7 @@ inetRouter
 centralRouter
 ```
 
-## 3. Ansible provision.yml
+## 3. ansible/provision.yml
 
 ```yaml
 ---
@@ -293,7 +294,7 @@ centralRouter
         state: restarted
 ```
 
-## ansible.cfg
+## 4. ansible/ansible.cfg
 ```ini
 [defaults]
 host_key_checking = False
@@ -304,7 +305,7 @@ remote_user = vagrant
 ssh_args = -o ControlMaster=auto -o ControlPersist=60s -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no
 ```
 
-## 4. ansible/templates
+## 5. ansible/templates
 
 ### ifcfg-bond0.j2
 ```jinja2
