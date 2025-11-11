@@ -599,7 +599,7 @@ ping 192.168.255.9
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
+WHITE='\033[1;37m'
 NC='\033[0m' # No Color
 
 # Function to print colored output
@@ -620,7 +620,7 @@ run_vagrant() {
     vagrant ssh "$machine" -c "$command" 2>/dev/null
 }
 
-echo -e "${BLUE}=== Network Configuration Verification Tests ===${NC}"
+echo -e "${YELLOW}=== Network Configuration Verification Tests ===${NC}"
 echo
 
 # Test 1: VLAN 1 Connectivity
@@ -720,7 +720,7 @@ echo -e "${YELLOW}4. Testing Bond Failover${NC}"
 
 echo -n "  Getting active bond slave before test... "
 ACTIVE_SLAVE_BEFORE=$(run_vagrant centralRouter "cat /proc/net/bonding/bond0 | grep 'Currently Active Slave' | awk '{print \$4}'")
-echo -e "${BLUE}$ACTIVE_SLAVE_BEFORE${NC}"
+echo -e "${WHITE}$ACTIVE_SLAVE_BEFORE${NC}"
 
 echo -n "  Disabling eth1 on centralRouter... "
 run_vagrant centralRouter "sudo ip link set eth1 down" > /dev/null 2>&1
@@ -728,7 +728,7 @@ sleep 3
 
 echo -n "  Getting active bond slave after failover... "
 ACTIVE_SLAVE_AFTER=$(run_vagrant centralRouter "cat /proc/net/bonding/bond0 | grep 'Currently Active Slave' | awk '{print \$4}'")
-echo -e "${BLUE}$ACTIVE_SLAVE_AFTER${NC}"
+echo -e "${WHITE}$ACTIVE_SLAVE_AFTER${NC}"
 
 echo -n "  Testing connectivity after failover... "
 if run_vagrant inetRouter "ping -c 2 -W 1 192.168.255.2" > /dev/null 2>&1; then
@@ -769,14 +769,14 @@ echo -e "${YELLOW}6. Network Interface Summary${NC}"
 machines=("inetRouter" "centralRouter" "office1Router" "testClient1" "testServer1" "testClient2" "testServer2")
 
 for machine in "${machines[@]}"; do
-    echo -e "  ${BLUE}$machine:${NC}"
+    echo -e "  ${WHITE}$machine:${NC}"
     run_vagrant "$machine" "ip addr show | grep -E '^[0-9]:|inet ' | grep -E '(eth|enp|vlan|bond)' | head -10" | while read -r line; do
         echo "    $line"
     done
     echo
 done
 
-echo -e "${BLUE}=== Test Complete ===${NC}"
+echo -e "${YELLOW}=== Test Complete ===${NC}"
 ```
 ![alt text](image-2.png)
 
