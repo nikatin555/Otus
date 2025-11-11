@@ -1,0 +1,98 @@
+---
+- name: Base software installation
+  hosts: all
+  become: yes
+  tasks:
+    - name: Install software on AlmaLinux
+      dnf:
+        name:
+          - vim
+          - traceroute
+          - tcpdump
+          - net-tools
+        state: present
+        update_cache: yes
+      when: ansible_distribution == "AlmaLinux"
+
+    - name: Install software on Ubuntu
+      apt:
+        name: 
+          - vim
+          - traceroute
+          - tcpdump
+          - net-tools
+        state: present
+        update_cache: yes
+      when: ansible_distribution == "Ubuntu"
+
+- name: Configure VLAN 1 on AlmaLinux hosts
+  hosts: vlan1_hosts
+  become: yes
+  tasks:
+    - name: Create VLAN 1 configuration for AlmaLinux
+      template:
+        src: ifcfg-vlan1.j2
+        dest: /etc/sysconfig/network-scripts/ifcfg-eth1.{{ vlan_id }}
+        owner: root
+        group: root
+        mode: 0644
+  
+    - name: Restart network for VLAN 1
+      service:
+        name: NetworkManager
+        state: restarted
+
+- name: Configure VLAN 2 on Ubuntu hosts
+  hosts: vlan2_hosts
+  become: yes
+  tasks:
+    - name: Ensure physical interface is up
+      shell: ip link set enp0s8 up
+      
+    - name: Create VLAN 2 configuration for Ubuntu
+      template:
+        src: 50-ubuntu-vlan.yaml.j2
+        dest: /etc/netplan/50-vlan-config.yaml
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: Apply netplan configuration
+      shell: netplan apply
+
+    - name: Wait for network stabilization
+      pause:
+        seconds: 3
+
+- name: Configure bond interface
+  hosts: bond_hosts
+  become: yes
+  tasks:
+    - name: Create bond interface configuration
+      template:
+        src: ifcfg-bond0.j2
+        dest: /etc/sysconfig/network-scripts/ifcfg-bond0
+        owner: root
+        group: root
+        mode: 0644
+  
+    - name: Configure eth1 for bond
+      copy:
+        src: templates/ifcfg-eth1
+        dest: /etc/sysconfig/network-scripts/ifcfg-eth1
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: Configure eth2 for bond
+      copy:
+        src: templates/ifcfg-eth2
+        dest: /etc/sysconfig/network-scripts/ifcfg-eth2
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: Restart network service
+      service:
+        name: NetworkManager
+        state: restarted
