@@ -1,0 +1,247 @@
+---
+- name: Final complete FreeIPA setup
+  hosts: all
+  become: yes
+  tasks:
+    - name: Install basic packages
+      dnf:
+        name:
+          - vim
+          - chrony
+          - openssh-clients
+        state: present
+
+    - name: Set timezone
+      timezone:
+        name: Europe/Moscow
+
+    - name: Start and enable chronyd
+      systemd:
+        name: chronyd
+        state: started
+        enabled: yes
+
+    - name: Disable SELinux temporarily
+      command: setenforce 0
+      ignore_errors: yes
+
+    - name: Disable SELinux permanently
+      lineinfile:
+        path: /etc/selinux/config
+        regexp: '^SELINUX='
+        line: 'SELINUX=disabled'
+        backup: yes
+
+    - name: Update hosts file
+      blockinfile:
+        path: /etc/hosts
+        block: |
+          192.168.57.56 ipa.otus.lan ipa
+          192.168.57.57 client1.otus.lan client1
+          192.168.57.58 client2.otus.lan client2
+
+- name: Setup FreeIPA server
+  hosts: ipa
+  become: yes
+  vars:
+    ipa_admin_password: "SecurePassword123"
+    ipa_dm_password: "SecureDMpassword123"
+
+  tasks:
+    - name: Install FreeIPA server packages
+      dnf:
+        name:
+          - ipa-server
+          - ipa-server-dns
+        state: present
+
+    - name: Install FreeIPA server
+      command: |
+        ipa-server-install -U \
+          --domain=otus.lan \
+          --realm=OTUS.LAN \
+          --ds-password="{{ ipa_dm_password }}" \
+          --admin-password="{{ ipa_admin_password }}" \
+          --hostname=ipa.otus.lan \
+          --ip-address=192.168.57.56 \
+          --setup-dns \
+          --no-forwarders \
+          --no-ntp \
+          --mkhomedir
+      args:
+        creates: /etc/ipa/default.conf
+      register: ipa_install
+      failed_when: 
+        - ipa_install.rc != 0
+        - "'already installed' not in ipa_install.stderr"
+
+    - name: Wait for IPA services to stabilize
+      pause:
+        seconds: 30
+
+- name: Setup FreeIPA clients
+  hosts: clients
+  become: yes
+  vars:
+    ipa_admin_password: "SecurePassword123"
+
+  tasks:
+    - name: Install FreeIPA client
+      dnf:
+        name: freeipa-client
+        state: present
+
+    - name: Join FreeIPA domain
+      command: |
+        ipa-client-install \
+          --domain=otus.lan \
+          --server=ipa.otus.lan \
+          --mkhomedir \
+          --no-ntp \
+          -p admin \
+          -w "{{ ipa_admin_password }}" \
+          --unattended \
+          --force-join
+      args:
+        creates: /etc/ipa/default.conf
+      register: ipa_join
+      ignore_errors: yes
+
+    - name: Restart SSSD if join succeeded
+      systemd:
+        name: sssd
+        state: restarted
+      when: ipa_join is succeeded
+
+    - name: Clear SSSD cache
+      command: sss_cache -E
+      when: ipa_join is succeeded
+      ignore_errors: yes
+
+- name: Create test users
+  hosts: ipa
+  become: yes
+  vars:
+    ipa_admin_password: "SecurePassword123"
+
+  tasks:
+    - name: Get Kerberos ticket as admin
+      shell: |
+        echo "{{ ipa_admin_password }}" | kinit admin
+
+    - name: Create test user
+      shell: |
+        /bin/bash << 'EOF'
+        echo "{{ ipa_admin_password }}" | kinit admin
+        ipa user-add testuser \
+          --first=Test \
+          --last=User \
+          --password << 'PASSWORD'
+        TempPass123
+        TempPass123
+        PASSWORD
+        EOF
+      args:
+        executable: /bin/bash
+      register: create_user
+      ignore_errors: yes
+
+    - name: Create additional test user
+      shell: |
+        /bin/bash << 'EOF'
+        echo "{{ ipa_admin_password }}" | kinit admin
+        ipa user-add otus-user \
+          --first=Otus \
+          --last=User \
+          --password << 'PASSWORD'
+        OtusPass123
+        OtusPass123
+        PASSWORD
+        EOF
+      args:
+        executable: /bin/bash
+      when: create_user is succeeded
+      ignore_errors: yes
+
+- name: Final verification
+  hosts: all
+  become: yes
+
+  tasks:
+    - name: Check hostname and network
+      command: hostname -f
+      register: hostname_result
+
+    - name: Display hostname
+      debug:
+        var: hostname_result.stdout
+
+    - name: Check time synchronization
+      command: chronyc sources
+      register: chrony_status
+
+    - name: Display chrony status
+      debug:
+        var: chrony_status.stdout
+
+- name: Verify FreeIPA setup
+  hosts: ipa
+  become: yes
+
+  tasks:
+    - name: Check IPA services
+      command: ipactl status
+      register: ipa_services
+
+    - name: Display IPA services status
+      debug:
+        var: ipa_services.stdout
+
+    - name: List all users
+      command: ipa user-find
+      register: all_users
+
+    - name: Display all users
+      debug:
+        var: all_users.stdout
+
+- name: Verify clients setup
+  hosts: clients
+  become: yes
+
+  tasks:
+    - name: Check SSSD status
+      command: sssctl domain-status otus.lan
+      register: sssd_status
+      ignore_errors: yes
+
+    - name: Display SSSD status
+      debug:
+        var: sssd_status.stdout
+
+    - name: Test user lookup - admin
+      command: getent passwd admin
+      register: admin_lookup
+
+    - name: Display admin lookup
+      debug:
+        var: admin_lookup.stdout
+
+    - name: Test user lookup - testuser
+      command: getent passwd testuser
+      register: testuser_lookup
+      ignore_errors: yes
+
+    - name: Display testuser lookup
+      debug:
+        var: testuser_lookup.stdout
+
+    - name: Test Kerberos authentication
+      command: |
+        echo "SecurePassword123" | kinit admin
+      register: kinit_test
+      ignore_errors: yes
+
+    - name: Display kinit result
+      debug:
+        var: kinit_test
