@@ -1,0 +1,90 @@
+---
+- name: Configure Dynamic Web Stack
+  hosts: DynamicWeb
+  become: yes
+  gather_facts: false
+  
+  tasks:
+    - name: Wait for system to fully boot
+      wait_for_connection:
+        timeout: 300
+        
+    - name: Gather facts
+      setup:
+        
+    - name: Update apt package cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+        
+    - name: Install required system packages
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - software-properties-common
+          - python3-pip
+          - git
+        state: present
+        
+    - name: Add Docker GPG key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+        
+    - name: Add Docker repository
+      apt_repository:
+        repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu jammy stable"
+        state: present
+        update_cache: yes
+        
+    - name: Install Docker
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+        state: present
+        update_cache: yes
+        
+    - name: Install Docker Compose
+      shell: |
+        curl -L "https://github.com/docker/compose/releases/download/v2.24.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+        chmod +x /usr/local/bin/docker-compose
+      args:
+        creates: /usr/local/bin/docker-compose
+        
+    - name: Add vagrant user to docker group
+      user:
+        name: vagrant
+        groups: docker
+        append: yes
+        
+    - name: Start and enable Docker service
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+        
+    - name: Copy project files
+      copy:
+        src: ./project
+        dest: /home/vagrant/
+        owner: vagrant
+        group: vagrant
+        mode: '0755'
+        
+    - name: Reset SSH connection to apply group changes
+      meta: reset_connection
+        
+    - name: Wait for reconnection
+      wait_for_connection:
+        timeout: 60
+        
+    - name: Deploy applications with Docker Compose
+      community.docker.docker_compose:
+        project_src: /home/vagrant/project
+        state: present
+      become: yes
+      become_user: vagrant

@@ -1,0 +1,28 @@
+ENV['VAGRANT_SERVER_URL'] = 'https://vagrant.elab.pro'
+
+Vagrant.configure(2) do |config|
+  config.vm.define "DynamicWeb" do |vmconfig|
+    vmconfig.vm.box = "ubuntu/jammy64"  # Ubuntu 22.04 LTS
+    vmconfig.vm.hostname = "DynamicWeb"
+    
+    # Проброс портов для каждого приложения
+    vmconfig.vm.network "forwarded_port", guest: 8081, host: 8081, auto_correct: true
+    vmconfig.vm.network "forwarded_port", guest: 8082, host: 8082, auto_correct: true  
+    vmconfig.vm.network "forwarded_port", guest: 8083, host: 8083, auto_correct: true
+    
+    vmconfig.vm.provider "virtualbox" do |vb|
+      vbx.memory = 8192
+      vbx.cpus = 2
+      vbx.customize ["modifyvm", :id, "--audio", "none"]
+    end
+    
+    # Ждем полной загрузки системы перед запуском Ansible
+    vmconfig.vm.boot_timeout = 600
+    
+    # Настройка SSH для корректной работы Ansible
+    vmconfig.vm.provision "shell", inline: <<-SHELL
+      sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/g' /etc/ssh/sshd_config
+      systemctl reload sshd
+    SHELL
+  end
+end
