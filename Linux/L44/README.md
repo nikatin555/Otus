@@ -107,7 +107,7 @@ dnf install -y https://repo.percona.com/yum/percona-release-latest.noarch.rpm
 # Включаем репозиторий Percona Server 8.4
 percona-release setup -y ps-84-lts
 
-# Убедитесь, что модуль MySQL включен в систему в настоящее время:
+# Убедимся, что модуль MySQL включен в систему в настоящее время:
 $ sudo dnf module list mysql
 
 #Включаем сервер Percona для репозитория MySQL:
@@ -202,19 +202,7 @@ SELECT user, host, plugin, ssl_type FROM mysql.user WHERE user = 'repl';
 
 ![alt text](image-3.png)
 
-### 5. Создание дампа базы данных
-
-На **мастере**:
-
-```bash
-# Создаем дамп, игнорируя указанные таблицы
-mysqldump --all-databases --triggers --routines --source-data \
---ignore-table=bet.events_on_demand \
---ignore-table=bet.v_same_event \
--uroot -p'YourStrongPassword123!' > /vagrant/master.sql
-```
-
-### 6. Настройка слейва
+### 5. Настройка слейва
 
 На **слейве** создаем конфигурационный файл:
 
@@ -263,7 +251,7 @@ FLUSH PRIVILEGES;
 exit
 ```
 
-### 7. Настройка репликации с фильтрацией
+### 6. Настройка репликации с фильтрацией
 
 На **слейве** в MySQL:
 
@@ -299,7 +287,7 @@ SHOW REPLICA STATUS\G
 
 -- Можно вместо `REPLICATE_WILD_IGNORE_TABLE` использовать белый список, `Replicate_Wild_Do_Table` для исключения реплицирования новых таблиц, но в моём тесте, почему-то, с данной настройкой `REPLICATE_WILD_DO_TABLE = ('bet.bookmaker', 'bet.competition', 'bet.market', 'bet.odds', 'bet.outcome');` не синхронизировались все таблицы и даже новые. Решение я нашёл, описал в пунте "4)", раздела `Проблемы, с которыми столкнулся, во время выполнения домашнего задания`
 
-## 8. Включаем GTID поэтапно на обеих нодах
+## 7. Включаем GTID поэтапно на обеих нодах
 
 ### Поэтапное включение GTID
 
@@ -348,7 +336,7 @@ mysql -uroot -p'YourStrongPassword123!' -e "SELECT @@GLOBAL.gtid_mode, @@GLOBAL.
 
 ![alt text](image-5.png)
 
-## 9. Проверим работу репликации:
+## 8. Проверим работу репликации
 
 **На мастере:**
 ```sql
@@ -375,7 +363,7 @@ SHOW TABLES;
 ```
 ![alt text](image-12.png)
 
-### Проверим фильтрацию таблиц:
+### Проверим фильтрацию таблиц
 
 **На мастере:**
 ```sql
@@ -445,7 +433,7 @@ REPLICATE_WILD_IGNORE_TABLE = ('bet.events_on_demand', 'bet.v_same_event');
 START REPLICA;
 ```
 
-3) Если будут проблемы с пользоватлем для репликации, необходимо:
+3) Если будут проблемы с пользователем для репликации, необходимо:
 
 **На мастере:**
 ```sql
