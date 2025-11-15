@@ -1,0 +1,30 @@
+```ruby
+ENV['VAGRANT_SERVER_URL'] = 'https://vagrant.elab.pro'
+
+Vagrant.configure("2") do |config|
+  config.vm.box = "almalinux/9"
+  config.vm.box_check_update = false
+  
+  # Master node
+  config.vm.define "mysql-master" do |master|
+    master.vm.hostname = "mysql-master"
+    master.vm.network "private_network", ip: "192.168.56.10"
+    master.vm.provider "virtualbox" do |vb|
+      vb.memory = 4096
+      vb.cpus = 2
+      vb.name = "mysql-master"
+    end
+  end
+
+  # Slave node
+  config.vm.define "mysql-slave" do |slave|
+    slave.vm.hostname = "mysql-slave"
+    slave.vm.network "private_network", ip: "192.168.56.11"
+    slave.vm.provider "virtualbox" do |vb|
+      vb.memory = 4096
+      vb.cpus = 2
+      vb.name = "mysql-slave"
+    end
+  end
+end
+```
