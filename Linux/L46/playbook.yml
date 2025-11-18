@@ -1,0 +1,92 @@
+---
+- name: Wait for all nodes to be ready
+  hosts: all
+  become: yes
+  tasks:
+    - name: Wait for SSH connection
+      wait_for_connection:
+        timeout: 60
+
+    - name: Add hosts entries to all nodes
+      lineinfile:
+        path: /etc/hosts
+        line: "{{ item.value }} {{ item.key }}"
+        state: present
+      with_dict:
+        node1: "192.168.57.11"
+        node2: "192.168.57.12"
+        barman: "192.168.57.13"
+
+- name: Install PostgreSQL on database servers
+  hosts: postgres_servers
+  become: yes
+  roles:
+    - install_postgres
+
+- name: Configure PostgreSQL replication
+  hosts: postgres_servers
+  become: yes
+  roles:
+    - postgres_replication
+
+- name: Install and configure Barman
+  hosts: barman
+  become: yes
+  roles:
+    - install_barman
+
+- name: Final verification tests
+  hosts: all
+  become: yes
+  tasks:
+    - name: Create test database on node1
+      shell: |
+        sudo -u postgres psql -c "CREATE DATABASE IF NOT EXISTS final_verification;"
+        sudo -u postgres psql -d final_verification -c "CREATE TABLE IF NOT EXISTS test_table AS SELECT generate_series(1,100) as id;"
+      when: inventory_hostname == "node1"
+
+    - name: Verify replication on node2
+      shell: |
+        sudo -u postgres psql -d final_verification -c "SELECT count(*) as record_count FROM test_table;"
+      when: inventory_hostname == "node2"
+      register: replication_result
+
+    - name: Show replication verification
+      debug:
+        msg: "Replication verified: {{ replication_result.stdout }} records on node2"
+      when: inventory_hostname == "node2"
+
+    - name: Final Barman comprehensive check
+      shell: |
+        sudo -u barman barman check node1
+      when: inventory_hostname == "barman"
+      register: barman_final_check
+
+    - name: Show comprehensive Barman status
+      debug:
+        msg: "{{ barman_final_check.stdout_lines }}"
+      when: inventory_hostname == "barman"
+
+- name: Display completion summary
+  hosts: localhost
+  connection: local
+  tasks:
+    - name: Show completion message
+      debug:
+        msg: |
+          === PostgreSQL Replication and Barman Setup Complete ===
+          
+          Access details:
+          - Node1 (Master): 192.168.57.11:5432
+          - Node2 (Replica): 192.168.57.12:5432  
+          - Barman: 192.168.57.13
+          
+          Passwords:
+          - postgres user: postgres123
+          - replication user: Otus2022!
+          - barman user: barman123
+          - streaming_barman: streaming123
+          
+          Verification commands:
+          vagrant ssh node1 -c "sudo -u postgres psql -h node2 -U postgres -c 'SELECT now() - pg_last_xact_replay_timestamp() AS lag;'"
+          vagrant ssh barman -c "sudo -u barman barman check node1"

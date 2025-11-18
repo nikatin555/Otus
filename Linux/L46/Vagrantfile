@@ -1,0 +1,77 @@
+ENV['VAGRANT_SERVER_URL'] = 'https://vagrant.elab.pro'
+
+MACHINES = {
+  :node1 => {
+    :box_name => "ubuntu/jammy64",
+    :vm_name => "node1",
+    :cpus => 2,
+    :memory => 4096,
+    :ip => "192.168.57.11",
+  },
+  :node2 => {
+    :box_name => "ubuntu/jammy64",
+    :vm_name => "node2",
+    :cpus => 2,
+    :memory => 4096,
+    :ip => "192.168.57.12",
+  },
+  :barman => {
+    :box_name => "ubuntu/jammy64",
+    :vm_name => "barman",
+    :cpus => 1,
+    :memory => 4096,
+    :ip => "192.168.57.13",
+  },
+}
+
+Vagrant.configure("2") do |config|
+  config.vm.box_check_update = false
+
+  MACHINES.each do |boxname, boxconfig|
+    config.vm.define boxname do |box|
+      box.vm.box = boxconfig[:box_name]
+      box.vm.host_name = boxconfig[:vm_name]
+      box.vm.network "private_network", ip: boxconfig[:ip]
+
+      box.vm.provider "virtualbox" do |v|
+        v.memory = boxconfig[:memory]
+        v.cpus = boxconfig[:cpus]
+        v.name = boxconfig[:vm_name]
+      end
+
+      # Установка Python и настройка для работы с современными версиями Ansible
+      box.vm.provision "shell", inline: <<-SHELL
+        apt-get update
+        apt-get install -y python3 python3-apt net-tools iproute2 curl wget gnupg
+        # Отключаем проблемные функции ACL
+        mkdir -p /etc/ansible
+        echo "[defaults]" > /etc/ansible/ansible.cfg
+        echo "allow_world_readable_tmpfiles = true" >> /etc/ansible/ansible.cfg
+        echo "[privilege_escalation]" >> /etc/ansible/ansible.cfg
+        echo "become_method = sudo" >> /etc/ansible/ansible.cfg
+      SHELL
+    end
+  end
+
+  # Явное указание порядка создания VM
+  config.vm.define "node1", primary: true do |node1|
+  end
+
+  config.vm.define "node2" do |node2|
+    node2.vm.provision "shell", inline: "echo 'Waiting for all nodes...'"
+  end
+
+  config.vm.define "barman" do |barman|
+    barman.vm.provision "shell", inline: "echo 'Waiting for all nodes...'"
+
+    # Запуск Ansible только на последней VM
+    barman.vm.provision "ansible" do |ansible|
+      ansible.playbook = "ansible/provision.yml"
+      ansible.inventory_path = "ansible/inventory.ini"
+      ansible.become = true
+      ansible.limit = "all"
+      ansible.host_key_checking = false
+      ansible.raw_ssh_args = ['-o StrictHostKeyChecking=no', '-o UserKnownHostsFile=/dev/null']
+    end
+  end
+end
