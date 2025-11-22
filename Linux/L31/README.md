@@ -426,7 +426,7 @@ line vty
         var: ospf_neighbors.stdout
 ```
 
-### плейбук установки FRR
+### 11. Плейбук установки FRR
 
 ```yaml
 ---
@@ -764,7 +764,7 @@ ansible-playbook -i hosts deploy_ospf_lab.yml
       when: inventory_hostname == "router2"
 ```
 
-#### 4. Комплексный тест всего задания
+####  Комплексный тест всего задания
 
 Создал `ansible/full_lab_test.yml`:
 

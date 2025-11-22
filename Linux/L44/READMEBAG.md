@@ -39,7 +39,7 @@
 4. Пример в логе изменения строки и появления строки на реплике*
 
 
-Я подготовлю решение для настройки MySQL репликации с использованием современных технологий. Вот полный комплект файлов:
+
 
 ## 1. Vagrantfile
 
@@ -1039,3 +1039,53 @@ SHOW REPLICA STATUS\G
 ```
 
 ===================================
+
+Для задания со *:
+
+
+## 5. Демонстрация с временными метками
+
+### Создаем демонстрационную таблицу (если нужно):
+**На мастере:**
+```sql
+USE bet;
+CREATE TABLE IF NOT EXISTS replication_demo (
+    id INT PRIMARY KEY,
+    data VARCHAR(100),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+### Демонстрация:
+**На мастере:**
+```sql
+-- Вставляем данные с временными метками
+INSERT INTO replication_demo (id, data) VALUES (1, 'First demo record');
+SELECT SLEEP(2);
+INSERT INTO replication_demo (id, data) VALUES (2, 'Second demo record');
+
+-- Смотрим что вставилось
+SELECT * FROM replication_demo ORDER BY created_at DESC;
+```
+
+**На слейве:**
+```sql
+-- Проверяем репликацию
+SELECT * FROM replication_demo ORDER BY created_at DESC;
+
+-- Смотрим задержку репликации
+SHOW REPLICA STATUS\G
+-- Смотрим Seconds_Behind_Source
+```
+
+Создание дампа базы данных
+
+На **мастере**:
+
+```bash
+# Создаем дамп, игнорируя указанные таблицы
+mysqldump --all-databases --triggers --routines --source-data \
+--ignore-table=bet.events_on_demand \
+--ignore-table=bet.v_same_event \
+-uroot -p'YourStrongPassword123!' > /vagrant/master.sql
+```
